@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#f4f6f2">
+  <title>Stockroom | Inventory</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <main id="auth-view" class="auth-view" hidden>
+    <section class="auth-panel">
+      <a class="brand brand-auth" href="#"><span class="brand-mark">S</span><span>stockroom<span class="brand-dot">.</span></span></a>
+      <div class="auth-copy"><p class="eyebrow">SHOP INVENTORY</p><h1>Good stock.<br>Clear head.</h1><p>Sign in to keep your kitchen supplies in order.</p></div>
+      <form id="login-form" class="form-stack">
+        <label>Email address<input name="email" type="email" autocomplete="username" placeholder="you@yourshop.com" required></label>
+        <label>Password<input name="password" type="password" autocomplete="current-password" placeholder="At least 6 characters" required minlength="6"></label>
+        <button class="button button-primary button-wide" type="submit">Sign in</button>
+        <p id="auth-message" class="form-message" aria-live="polite"></p>
+      </form>
+      <p class="auth-foot">New here? <button id="auth-mode" class="text-button" type="button">Create an account</button></p>
+    </section>
+    <aside class="auth-art"><img class="auth-logo" src="logo.png" alt="Noor Mehal Pizza Hut"><div class="auth-art-tag">Every ingredient, accounted for.</div></aside>
+  </main>
+
+  <div id="app-view" class="app-shell" hidden>
+    <aside id="sidebar" class="sidebar">
+      <a class="brand" href="#dashboard"><span class="brand-mark">S</span><span>stockroom<span class="brand-dot">.</span></span></a>
+      <div class="shop-label">YOUR KITCHEN</div>
+      <nav id="main-nav" class="main-nav" aria-label="Main navigation">
+        <button data-page="dashboard" class="nav-item active"><span class="nav-icon">D</span>Dashboard</button>
+        <button data-page="inventory" class="nav-item"><span class="nav-icon">I</span>Inventory</button>
+        <button data-page="purchases" class="nav-item"><span class="nav-icon">P</span>Purchases</button>
+        <button data-page="market" class="nav-item"><span class="nav-icon">M</span>Market Purchase</button>
+        <button data-page="expenses" class="nav-item"><span class="nav-icon">X</span>Expenses</button>
+        <button data-page="jazzcash" class="nav-item"><span class="nav-icon">J</span>JazzCash Payments</button>
+        <button data-page="demand" class="nav-item"><span class="nav-icon">≡</span>Daily Demand</button>
+        <button data-page="payables" class="nav-item"><span class="nav-icon">₨</span>Pending Bills</button>
+        <button data-page="suppliers" class="nav-item"><span class="nav-icon">S</span>Suppliers</button>
+        <button data-page="categories" class="nav-item"><span class="nav-icon">C</span>Categories</button>
+        <button data-page="reports" class="nav-item"><span class="nav-icon">R</span>Reports</button>
+        <div class="shop-label">STAFF</div>
+        <button data-page="employees" class="nav-item"><span class="nav-icon">E</span>Employees</button>
+        <button data-page="attendance" class="nav-item"><span class="nav-icon">A</span>Attendance</button>
+        <button data-page="staffreport" class="nav-item"><span class="nav-icon">%</span>Staff Report</button>
+        <button data-page="advances" class="nav-item"><span class="nav-icon">$</span>Advances</button>
+        <button data-page="candidates" class="nav-item"><span class="nav-icon">H</span>Hiring</button>
+        <button data-page="settings" class="nav-item"><span class="nav-icon">⚙</span>Settings</button>
+      </nav>
+      <div class="sidebar-bottom"><div class="sidebar-note"><span class="status-pulse"></span><span>Inventory in sync</span></div><div class="profile-row"><div class="avatar">S</div><div class="profile-copy"><strong id="profile-email">Signed in</strong><span>Shop account</span></div><button id="logout-button" class="icon-button" type="button" title="Sign out" aria-label="Sign out">↗</button></div></div>
+    </aside>
+    <div class="workspace">
+      <header class="topbar"><button id="menu-toggle" class="icon-button menu-toggle" type="button" aria-label="Open navigation">☰</button><div class="breadcrumbs"><span>Stockroom</span><span class="crumb-slash">/</span><strong id="page-crumb">Dashboard</strong></div><div class="topbar-actions"><label class="global-search"><span>⌕</span><input id="global-search" type="search" placeholder="Search inventory..." aria-label="Search inventory"><kbd>/</kbd></label><span id="today-label" class="today-label"></span></div></header>
+      <main id="page-content" class="page-content" aria-live="polite"></main>
+    </div>
+    <div id="sidebar-scrim" class="sidebar-scrim"></div>
+  </div>
+
+  <dialog id="modal" class="modal"><div id="modal-content"></div></dialog>
+  <div id="toast-region" class="toast-region" aria-live="polite"></div>
+  <script>
+    window.APP_CONFIG = { supabaseUrl: "https://qwfzaemloeqchsdebtuz.supabase.co", supabaseAnonKey: "sb_publishable_PcrTQvFu_N8tml2hA7VhMQ_6VJxAnJU" };
+  </script>
+  <script type="module" src="app.js"></script>
+</body>
+</html>
