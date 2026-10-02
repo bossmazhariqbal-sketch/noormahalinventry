@@ -1,12 +1,13 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+import { PRESENT, round2, monthRange, monthAttendance, calcStaffStats, staffTotals, attendanceTotals, paymentMonth } from './staff-calc.js';
 
 const config = window.APP_CONFIG || {};
 const configured = config.supabaseUrl?.startsWith('https://') && config.supabaseAnonKey && !config.supabaseAnonKey.includes('YOUR_');
 const supabase = configured ? createClient(config.supabaseUrl, config.supabaseAnonKey) : null;
-const state = { user: null, page: 'dashboard', items: [], categories: [], suppliers: [], purchases: [], purchaseItems: [], adjustments: [], demands: [], demandItems: [], employees: [], attendance: [], candidates: [], advances: [], marketLists: [], marketItems: [], billPayments: [], marketRange: [], expenses: [], jazzcashPayments: [], jazzcashToday: [], expenseRangeCount: 0, expenseTotalCount: 0, expFrom: '', expTo: '', expenseSearch: '', cashFrom: '', cashTo: '', paymentRangeInitialized: false, showSalary: false, staffMonth: '', attDate: '', search: '', purchaseFilter: { date: '', supplier: '' }, reportFilter: 'month', customFrom: '', customTo: '' };
+const state = { user: null, page: 'dashboard', items: [], categories: [], suppliers: [], purchases: [], purchaseItems: [], adjustments: [], demands: [], demandItems: [], employees: [], attendance: [], candidates: [], advances: [], salaryPayments: [], marketLists: [], marketItems: [], billPayments: [], marketRange: [], expenses: [], jazzcashPayments: [], jazzcashToday: [], expenseRangeCount: 0, expenseTotalCount: 0, expFrom: '', expTo: '', expenseSearch: '', cashFrom: '', cashTo: '', paymentRangeInitialized: false, showSalary: false, flow: { jazzcash: 0, supplierPaid: 0, market: 0, expenses: 0, dailySalary: 0 }, staffMonth: '', attDate: '', attDraft: null, search: '', purchaseFilter: { date: '', supplier: '' }, reportFilter: 'month', customFrom: '', customTo: '' };
 const $ = (selector, root = document) => root.querySelector(selector);
 const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
-const pageNames = { dashboard: 'Dashboard', inventory: 'Inventory', purchases: 'Purchases', demand: 'Daily Demand', suppliers: 'Suppliers', categories: 'Categories', reports: 'Reports', employees: 'Employees', attendance: 'Attendance', staffreport: 'Staff Report', candidates: 'Hiring', market: 'Market Purchase', payables: 'Pending Bills', expenses: 'Expenses', jazzcash: 'JazzCash Payments', advances: 'Advances', settings: 'Settings' };
+const pageNames = { dashboard: 'Dashboard', inventory: 'Inventory', purchases: 'Purchases', demand: 'Daily Demand', suppliers: 'Suppliers', categories: 'Categories', reports: 'Reports', employees: 'Employees', attendance: 'Attendance', staffreport: 'Staff Report', candidates: 'Hiring', market: 'Market Purchase', payables: 'Pending Bills', expenses: 'Expenses', jazzcash: 'JazzCash Payments', advances: 'Advances', salarypayments: 'Salary Payments', settings: 'Settings' };
 const money = value => `Rs. ${Number(value || 0).toLocaleString('en-PK', { maximumFractionDigits: 2 })}`;
 const salaryText = v => state.showSalary ? money(v) : 'Rs. ****';
 const salaryButton = () => `<button class="button" data-action="toggle-salary">${state.showSalary ? 'Hide salary' : 'Show salary'}</button>`;
@@ -20,6 +21,9 @@ const today = () => { const date = new Date(); return `${date.getFullYear()}-${S
 const monthStart = (date = new Date()) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-01`;
 const esc = value => String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]);
 const idMap = (rows, key = 'id') => new Map(rows.map(row => [row[key], row]));
+const sumBy = (rows, pick) => round2(rows.reduce((t, row) => t + Math.round((Number(pick(row)) || 0) * 100), 0) / 100);
+// Row of rupee totals shown at the top of a page: [label, value, extra class].
+const totalChips = list => `<div class="chip-row">${list.map(([label, value, cls = '']) => `<span class="chip">${label} <strong class="${cls}">${value}</strong></span>`).join('')}</div>`;
 
 function toast(message, error = false) {
   const node = document.createElement('div');
@@ -63,7 +67,7 @@ async function loadData() {
   let jazzcashQuery = supabase.from('jazzcash_payments').select('*').order('date', { ascending: false }).order('created_at', { ascending: false });
   if (state.cashFrom) jazzcashQuery = jazzcashQuery.gte('date', state.cashFrom);
   if (state.cashTo) jazzcashQuery = jazzcashQuery.lte('date', state.cashTo);
-  const [items, categories, suppliers, purchases, purchaseItems, adjustments, demands, demandItems, employees, attendance, candidates, advances, marketLists, marketRange, expenses, expenseTotalCount, jazzcashPayments, jazzcashToday, billPayments] = await Promise.all([
+  const [items, categories, suppliers, purchases, purchaseItems, adjustments, demands, demandItems, employees, attendance, attendanceDay, candidates, advances, salaryPayments, marketLists, marketRange, expenses, expenseTotalCount, jazzcashPayments, jazzcashToday, billPayments] = await Promise.all([
     supabase.from('inventory_items').select('*').order('name'),
     supabase.from('categories').select('*').order('name'),
     supabase.from('suppliers').select('*').order('name'),
@@ -74,8 +78,10 @@ async function loadData() {
     supabase.from('demand_items').select('*'),
     supabase.from('employees').select('*').order('name'),
     supabase.from('attendance').select('*').gte('date', range[0]).lte('date', range[1]),
+    state.attDate >= range[0] && state.attDate <= range[1] ? Promise.resolve({ data: [], error: null }) : supabase.from('attendance').select('*').eq('date', state.attDate),
     supabase.from('candidates').select('*').order('created_at', { ascending: false }),
     supabase.from('advances').select('*').order('date', { ascending: false }),
+    supabase.from('salary_payments').select('*').order('date', { ascending: false }).order('created_at', { ascending: false }),
     supabase.from('market_lists').select('*').order('date', { ascending: false }).order('created_at', { ascending: false }).limit(100),
     supabase.from('market_lists').select('*').eq('status', 'bought').gte('date', state.expFrom).lte('date', state.expTo),
     supabase.from('expenses').select('*', { count: 'exact' }).gte('date', state.expFrom).lte('date', state.expTo).order('date', { ascending: false }).order('created_at', { ascending: false }),
@@ -84,9 +90,23 @@ async function loadData() {
     supabase.from('jazzcash_payments').select('*').eq('date', today()),
     supabase.from('bill_payments').select('*').order('date', { ascending: false }).order('created_at', { ascending: false }).limit(200)
   ]);
+  const ms = monthStart(), [fx, fm, fj, fb, fa] = await Promise.all([
+    supabase.from('expenses').select('amount').gte('date', ms), supabase.from('market_lists').select('total_spent').eq('status', 'bought').gte('date', ms),
+    supabase.from('jazzcash_payments').select('amount').gte('date', ms), supabase.from('bill_payments').select('amount').gte('date', ms),
+    supabase.from('attendance').select('employee_id').eq('paid', true).gte('date', ms)
+  ]);
+  for (const result of [fx, fm, fj, fb, fa]) if (result.error) throw result.error;
+  const salaryOf = idMap(employees.data || []);
+  state.flow = { expenses: sumBy(fx.data, r => r.amount), market: sumBy(fm.data, r => r.total_spent), jazzcash: sumBy(fj.data, r => r.amount), supplierPaid: sumBy(fb.data, r => r.amount), dailySalary: sumBy(fa.data, r => salaryOf.get(r.employee_id)?.salary_type === 'daily' ? salaryOf.get(r.employee_id).salary : 0) };
   const marketIds = (marketLists.data || []).map(l => l.id), marketItems = marketIds.length ? await supabase.from('market_items').select('*').in('list_id', marketIds) : { data: [] };
-  for (const result of [items, categories, suppliers, purchases, purchaseItems, adjustments, demands, demandItems, employees, attendance, candidates, advances, marketLists, marketRange, expenses, expenseTotalCount, jazzcashPayments, jazzcashToday, marketItems, billPayments]) if (result.error) throw result.error;
-  Object.assign(state, { items: items.data, categories: categories.data, suppliers: suppliers.data, purchases: purchases.data, purchaseItems: purchaseItems.data, adjustments: adjustments.data, demands: demands.data, demandItems: demandItems.data, employees: employees.data, attendance: attendance.data, candidates: candidates.data, advances: advances.data, marketLists: marketLists.data, marketRange: marketRange.data, expenses: expenses.data, expenseRangeCount: expenses.count ?? expenses.data.length, expenseTotalCount: expenseTotalCount.count ?? 0, jazzcashPayments: jazzcashPayments.data, jazzcashToday: jazzcashToday.data, marketItems: marketItems.data, billPayments: billPayments.data });
+  for (const result of [items, categories, suppliers, purchases, purchaseItems, adjustments, demands, demandItems, employees, attendance, attendanceDay, candidates, advances, salaryPayments, marketLists, marketRange, expenses, expenseTotalCount, jazzcashPayments, jazzcashToday, marketItems, billPayments]) if (result.error) throw migrationHint(result.error);
+  Object.assign(state, { items: items.data, categories: categories.data, suppliers: suppliers.data, purchases: purchases.data, purchaseItems: purchaseItems.data, adjustments: adjustments.data, demands: demands.data, demandItems: demandItems.data, employees: employees.data, attendance: [...attendance.data, ...attendanceDay.data], candidates: candidates.data, advances: advances.data, salaryPayments: salaryPayments.data, marketLists: marketLists.data, marketRange: marketRange.data, expenses: expenses.data, expenseRangeCount: expenses.count ?? expenses.data.length, expenseTotalCount: expenseTotalCount.count ?? 0, jazzcashPayments: jazzcashPayments.data, jazzcashToday: jazzcashToday.data, marketItems: marketItems.data, billPayments: billPayments.data });
+}
+
+// Missing table/column/unique index usually means employee_salary_payments.sql was not run on this Supabase project yet.
+function migrationHint(error) {
+  if (['PGRST205', 'PGRST204', '42P01', '42703', '42P10'].includes(error?.code) || /salary_payments|salary_month|column .*paid/.test(error?.message || '')) error.message = `${error.message} — Supabase SQL Editor mein employee_salary_payments.sql run karein (README: Staff migration).`;
+  return error;
 }
 
 function heading(title, description, actions = '') {
@@ -100,7 +120,7 @@ function panel(title, subtitle, content, action = '') {
 function render() {
   $('#page-crumb').textContent = pageNames[state.page];
   $$('.nav-item').forEach(button => button.classList.toggle('active', button.dataset.page === state.page));
-  const views = { dashboard: renderDashboard, inventory: renderInventory, purchases: renderPurchases, demand: renderDemand, employees: renderEmployees, attendance: renderAttendance, staffreport: renderStaffReport, candidates: renderCandidates, market: renderMarket, payables: renderPayables, expenses: renderExpenses, jazzcash: renderJazzcash, advances: renderAdvances, suppliers: renderSuppliers, categories: renderCategories, reports: renderReports, settings: renderSettings };
+  const views = { dashboard: renderDashboard, inventory: renderInventory, purchases: renderPurchases, demand: renderDemand, employees: renderEmployees, attendance: renderAttendance, staffreport: renderStaffReport, candidates: renderCandidates, market: renderMarket, payables: renderPayables, expenses: renderExpenses, jazzcash: renderJazzcash, advances: renderAdvances, salarypayments: renderSalaryPayments, suppliers: renderSuppliers, categories: renderCategories, reports: renderReports, settings: renderSettings };
   $('#page-content').innerHTML = views[state.page]();
   if (state.page === 'dashboard') drawCharts();
   $('#global-search').value = state.search;
@@ -123,7 +143,10 @@ function renderDashboard() {
     ['JazzCash today', money(cashToday), 'JazzCash and QR received', 'J']
   ].map(([label, amount, note, mark]) => `<article class="metric-card"><div class="metric-top"><span>${label}</span><span class="metric-mark">${mark}</span></div><strong class="metric-value">${amount}</strong><span class="metric-note">${note}</span></article>`).join('');
   const lowList = lowItems.length ? lowItems.slice(0, 6).map(item => `<div class="low-row"><div class="low-item"><strong>${esc(item.name)}</strong><span>${number(item.current_stock)} ${esc(item.unit)}</span></div><div class="stock-level"><strong>${Number(item.current_stock) === 0 ? 'Out of stock' : 'Low stock'}</strong><span>Min. ${number(item.minimum_stock)} ${esc(item.unit)}</span></div></div>`).join('') : '<div class="empty-state"><strong>All stocked up</strong>No items are below their minimum level.</div>';
-  return `${heading('Dashboard', 'A quick read on what is in your kitchen today.', `<button class="button button-primary" data-action="open-purchase">+ Add purchase</button>`)}<section class="metrics-grid">${metrics}</section><div class="dashboard-grid"><div class="dashboard-column">${panel('Purchase summary', 'Spend recorded against inventory', `<div class="purchase-summary"><div class="summary-cell"><span class="summary-label">Today</span><strong class="summary-value">${money(sumPurchasesOn(today()))}</strong><span class="summary-period">${today()}</span></div><div class="summary-cell"><span class="summary-label">This month</span><strong class="summary-value">${money(currentMonth)}</strong><span class="summary-period">Since ${monthStart()}</span></div><div class="summary-cell"><span class="summary-label">All time</span><strong class="summary-value">${money(totalPurchases)}</strong><span class="summary-period">${state.purchases.length} purchase${state.purchases.length === 1 ? '' : 's'}</span></div></div>`)}${panel('Monthly purchases', 'Last 6 months · purchase total by month', '<div class="chart-wrap"><canvas id="purchase-chart" aria-label="Monthly purchases chart"></canvas></div>')}</div><div class="dashboard-column">${panel('Stock status', 'Items grouped by current stock level', '<div class="stock-chart-wrap"><canvas id="stock-chart" aria-label="Stock status chart"></canvas><div id="stock-legend" class="chart-legend"></div></div>')}${panel('Needs attention', `${lowItems.length} item${lowItems.length === 1 ? '' : 's'} at or below minimum stock`, `<div class="low-list">${lowList}</div>`, `<button class="text-button" data-page="inventory">View inventory</button>`)}</div></div>`;
+  const f = state.flow, ms = monthStart(), monthlySalary = sumBy(state.salaryPayments.filter(x => x.date >= ms), x => x.amount), advancesGiven = sumBy(state.advances.filter(x => x.date >= ms), x => x.amount);
+  const staffOut = round2(f.dailySalary + monthlySalary + advancesGiven), totalOut = round2(f.supplierPaid + f.market + f.expenses + staffOut), pendingSuppliers = sumBy(state.purchases, billDue);
+  const flowPanel = panel('Is mahine ka paisa', `Paisa kahan se aaya aur kahan laga (${ms} se ab tak)`, `<div class="purchase-summary"><div class="summary-cell"><span class="summary-label">Aaya (JazzCash / QR)</span><strong class="summary-value">${money(f.jazzcash)}</strong><span class="summary-period">Cash sale record nahi hoti</span></div><div class="summary-cell"><span class="summary-label">Laga (total)</span><strong class="summary-value due">${money(totalOut)}</strong><span class="summary-period">Neeche tafseel</span></div><div class="summary-cell"><span class="summary-label">Supplier udhaar baqi</span><strong class="summary-value due">${money(pendingSuppliers)}</strong><span class="summary-period">Pending Bills</span></div></div>${totalChips([['Supplier ko di', money(f.supplierPaid)], ['Market purchase', money(f.market)], ['Kharche', money(f.expenses)], ['Staff salary', money(f.dailySalary + monthlySalary)], ['Staff advance', money(advancesGiven)]])}`);
+  return `${heading('Dashboard', 'A quick read on what is in your kitchen today.', `<button class="button button-primary" data-action="open-purchase">+ Add purchase</button>`)}<section class="metrics-grid">${metrics}</section>${flowPanel}<div class="dashboard-grid"><div class="dashboard-column">${panel('Purchase summary', 'Spend recorded against inventory', `<div class="purchase-summary"><div class="summary-cell"><span class="summary-label">Today</span><strong class="summary-value">${money(sumPurchasesOn(today()))}</strong><span class="summary-period">${today()}</span></div><div class="summary-cell"><span class="summary-label">This month</span><strong class="summary-value">${money(currentMonth)}</strong><span class="summary-period">Since ${monthStart()}</span></div><div class="summary-cell"><span class="summary-label">All time</span><strong class="summary-value">${money(totalPurchases)}</strong><span class="summary-period">${state.purchases.length} purchase${state.purchases.length === 1 ? '' : 's'}</span></div></div>`)}${panel('Monthly purchases', 'Last 6 months · purchase total by month', '<div class="chart-wrap"><canvas id="purchase-chart" aria-label="Monthly purchases chart"></canvas></div>')}</div><div class="dashboard-column">${panel('Stock status', 'Items grouped by current stock level', '<div class="stock-chart-wrap"><canvas id="stock-chart" aria-label="Stock status chart"></canvas><div id="stock-legend" class="chart-legend"></div></div>')}${panel('Needs attention', `${lowItems.length} item${lowItems.length === 1 ? '' : 's'} at or below minimum stock`, `<div class="low-list">${lowList}</div>`, `<button class="text-button" data-page="inventory">View inventory</button>`)}</div></div>`;
 }
 
 function sumPurchasesOn(date) { return state.purchases.filter(purchase => purchase.date === date).reduce((sum, purchase) => sum + Number(purchase.total_amount), 0); }
@@ -133,7 +156,8 @@ function renderInventory() {
   const filtered = state.items.filter(item => `${item.name} ${categories.get(item.category_id)?.name || ''}`.toLowerCase().includes(state.search.toLowerCase()));
   const categoryOptions = state.categories.map(category => `<option value="${esc(category.id)}">${esc(category.name)}</option>`).join('');
   const rows = filtered.length ? filtered.map(item => `<tr><td><strong>${esc(item.name)}</strong><span class="cell-sub">${esc(categories.get(item.category_id)?.name || 'Uncategorized')}</span></td><td>${esc(item.unit)}</td><td>${number(item.current_stock)}</td><td>${number(item.minimum_stock)}</td><td>${costLabel(item)}</td><td><strong>${money(Number(item.current_stock) * Number(item.cost_per_unit))}</strong></td><td>${badge(item)}</td><td><div class="table-actions"><button class="action-button" data-action="adjust-stock" data-id="${item.id}">Adjust</button><button class="action-button" data-action="edit-item" data-id="${item.id}">Edit</button><button class="action-button danger" data-action="delete-item" data-id="${item.id}" aria-label="Delete ${esc(item.name)}">Delete</button></div></td></tr>`).join('') : `<tr><td colspan="8"><div class="empty-state"><strong>${state.items.length ? 'No matching items' : 'Your inventory is empty'}</strong>${state.items.length ? 'Try another search or category.' : 'Add your first item to get started.'}</div></td></tr>`;
-  return `${heading('Inventory', 'Keep an eye on quantities, costs, and stock levels.', '<button class="button" data-action="open-adjustment">Adjust stock</button><button class="button button-primary" data-action="add-item">+ Add item</button>')}<section class="panel"><div class="table-toolbar"><label class="field-search"><input id="inventory-search" type="search" value="${esc(state.search)}" placeholder="Search item name..."></label><select id="inventory-category-filter" class="filter-control"><option value="">All categories</option>${categoryOptions}</select><select id="inventory-status-filter" class="filter-control"><option value="">All stock status</option><option value="good">In Stock</option><option value="low">Low Stock</option><option value="out">Out of Stock</option></select></div><div class="table-scroll"><table><thead><tr><th>ITEM</th><th>UNIT</th><th>STOCK</th><th>MINIMUM</th><th>COST / UNIT</th><th>TOTAL VALUE</th><th>STATUS</th><th></th></tr></thead><tbody id="inventory-rows">${rows}</tbody></table></div><div class="table-footer">${filtered.length} of ${state.items.length} items</div></section>`;
+  const stockValue = rows => round2(rows.reduce((t, item) => t + Number(item.current_stock) * Number(item.cost_per_unit), 0));
+  return `${heading('Inventory', 'Keep an eye on quantities, costs, and stock levels.', '<button class="button" data-action="open-adjustment">Adjust stock</button><button class="button button-primary" data-action="add-item">+ Add item</button>')}${totalChips([['Items', state.items.length], ['Stock ki total value', money(stockValue(state.items))], ['Low stock', state.items.filter(i => statusFor(i)[1] === 'low').length, 'due'], ['Out of stock', state.items.filter(i => statusFor(i)[1] === 'out').length, 'due']])}<section class="panel"><div class="table-toolbar"><label class="field-search"><input id="inventory-search" type="search" value="${esc(state.search)}" placeholder="Search item name..."></label><select id="inventory-category-filter" class="filter-control"><option value="">All categories</option>${categoryOptions}</select><select id="inventory-status-filter" class="filter-control"><option value="">All stock status</option><option value="good">In Stock</option><option value="low">Low Stock</option><option value="out">Out of Stock</option></select></div><div class="table-scroll"><table><thead><tr><th>ITEM</th><th>UNIT</th><th>STOCK</th><th>MINIMUM</th><th>COST / UNIT</th><th>TOTAL VALUE</th><th>STATUS</th><th></th></tr></thead><tbody id="inventory-rows">${rows}</tbody></table></div><div class="table-footer">${filtered.length} of ${state.items.length} items · Value <strong>${money(stockValue(filtered))}</strong></div></section>`;
 }
 
 function renderPurchases() {
@@ -145,7 +169,8 @@ function renderPurchases() {
     const labels = lines.map(line => `${items.get(line.item_id)?.name || 'Item'} × ${number(line.quantity)}`).join(', ');
     return `<tr><td>${esc(purchase.date)}</td><td><strong>${esc(suppliers.get(purchase.supplier_id)?.name || 'No supplier')}</strong></td><td>${esc(labels || 'No items')}</td><td>${lines.reduce((sum, line) => sum + Number(line.quantity), 0)}</td><td><strong>${money(purchase.total_amount)}</strong></td><td>${payBadge(purchase)}</td><td>${billDue(purchase) > 0 ? `<button class="action-button" data-action="pay-bill" data-id="${purchase.id}">Pay</button>` : ''}</td></tr>`;
   }).join('') : '<tr><td colspan="7"><div class="empty-state"><strong>No purchases found</strong>Saved purchases will appear here.</div></td></tr>';
-  return `${heading('Purchases', 'Every purchase updates inventory stock automatically.', '<button class="button button-primary" data-action="open-purchase">+ Add purchase</button>')}<section class="panel"><div class="table-toolbar"><input id="purchase-date-filter" class="filter-control" type="date" value="${esc(state.purchaseFilter.date)}" aria-label="Filter by date"><select id="purchase-supplier-filter" class="filter-control"><option value="">All suppliers</option>${state.suppliers.map(supplier => `<option value="${esc(supplier.id)}" ${state.purchaseFilter.supplier === supplier.id ? 'selected' : ''}>${esc(supplier.name)}</option>`).join('')}</select><button class="button button-small" data-action="clear-purchase-filter">Clear filters</button></div><div class="table-scroll"><table><thead><tr><th>DATE</th><th>SUPPLIER</th><th>ITEMS</th><th>QUANTITY</th><th>AMOUNT</th><th>PAYMENT</th><th></th></tr></thead><tbody>${rows}</tbody></table></div><div class="table-footer">${rowsData.length} purchase${rowsData.length === 1 ? '' : 's'}</div></section>`;
+  const billed = sumBy(rowsData, p => p.total_amount), paidSum = sumBy(rowsData, p => p.paid_amount), dueSum = round2(billed - paidSum);
+  return `${heading('Purchases', 'Every purchase updates inventory stock automatically.', '<button class="button button-primary" data-action="open-purchase">+ Add purchase</button>')}${totalChips([['Total purchase', money(billed)], ['Ada kiya (Paid)', money(paidSum)], ['Baqi (Pending)', money(dueSum), dueSum > 0 ? 'due' : '']])}<section class="panel"><div class="table-toolbar"><input id="purchase-date-filter" class="filter-control" type="date" value="${esc(state.purchaseFilter.date)}" aria-label="Filter by date"><select id="purchase-supplier-filter" class="filter-control"><option value="">All suppliers</option>${state.suppliers.map(supplier => `<option value="${esc(supplier.id)}" ${state.purchaseFilter.supplier === supplier.id ? 'selected' : ''}>${esc(supplier.name)}</option>`).join('')}</select><button class="button button-small" data-action="clear-purchase-filter">Clear filters</button></div><div class="table-scroll"><table><thead><tr><th>DATE</th><th>SUPPLIER</th><th>ITEMS</th><th>QUANTITY</th><th>AMOUNT</th><th>PAYMENT</th><th></th></tr></thead><tbody>${rows}</tbody></table></div><div class="table-footer">${rowsData.length} purchase${rowsData.length === 1 ? '' : 's'} · Total <strong>${money(billed)}</strong> · Paid <strong>${money(paidSum)}</strong> · Pending <strong>${money(dueSum)}</strong></div></section>`;
 }
 
 function thermalWidth() { try { return localStorage.getItem('thermalWidth') === '58' ? '58' : '80'; } catch { return '80'; } }
@@ -153,12 +178,15 @@ function thermalWidth() { try { return localStorage.getItem('thermalWidth') === 
 function renderDemand() {
   const items = idMap(state.items), lines = new Map(), pending = state.demands.filter(d => d.status === 'open').length;
   state.demandItems.forEach(l => { const a = lines.get(l.demand_id) || []; a.push(l); lines.set(l.demand_id, a); });
+  // Value = quantity x the item's current cost per unit (an estimate: cost changes with each purchase).
+  const demandValue = ls => round2(ls.reduce((t, l) => t + Number(l.quantity) * Number(items.get(l.item_id)?.cost_per_unit || 0), 0));
+  const valueOf = status => round2(state.demands.filter(d => d.status === status).reduce((t, d) => t + demandValue(lines.get(d.id) || []), 0)), pendingValue = valueOf('open'), doneValue = valueOf('done');
   const rows = state.demands.length ? state.demands.map(d => {
-    const ls = lines.get(d.id) || [], open = d.status === 'open';
+    const ls = lines.get(d.id) || [], open = d.status === 'open', value = demandValue(ls);
     const text = ls.map(l => `${items.get(l.item_id)?.name || 'Item'} × ${number(l.quantity)}`).join(', ');
-    return `<tr><td><strong>${esc(d.date)}</strong>${d.note ? `<span class="cell-sub">${esc(d.note)}</span>` : ''}</td><td>${esc(text || '—')}</td><td>${ls.length}</td><td><span class="badge ${open ? 'badge-low' : 'badge-good'}">${open ? 'Pending' : 'Done'}</span></td><td><div class="table-actions"><button class="action-button" data-action="print-demand" data-id="${d.id}">Print</button>${open ? `<button class="action-button" data-action="done-demand" data-id="${d.id}">Done</button><button class="action-button danger" data-action="delete-demand" data-id="${d.id}">Delete</button>` : ''}</div></td></tr>`;
-  }).join('') : '<tr><td colspan="5"><div class="empty-state"><strong>Abhi koi demand nahi</strong>Roz ki demand yahan banayein aur print karein.</div></td></tr>';
-  return `${heading('Daily Demand', 'Roz ki demand banayein, thermal printer par print karein, phir Done karein.', `${pending ? `<button class="button" data-action="print-all-demand">Print all (${pending})</button><button class="button" data-action="done-all-demand">Done all</button>` : ''}<select id="thermal-width" class="filter-control" aria-label="Printer size"><option value="80">80mm printer</option><option value="58">58mm printer</option></select><button class="button button-primary" data-action="add-demand">+ New demand</button>`)}<section class="panel"><div class="table-scroll"><table><thead><tr><th>DATE</th><th>ITEMS</th><th>LINES</th><th>STATUS</th><th></th></tr></thead><tbody>${rows}</tbody></table></div><div class="table-footer">${state.demands.length} demand${state.demands.length === 1 ? '' : 's'}</div></section>`;
+    return `<tr><td><strong>${esc(d.date)}</strong>${d.note ? `<span class="cell-sub">${esc(d.note)}</span>` : ''}</td><td>${esc(text || '—')}</td><td>${ls.length}</td><td><strong>${money(value)}</strong></td><td><span class="badge ${open ? 'badge-low' : 'badge-good'}">${open ? 'Pending' : 'Done'}</span></td><td><div class="table-actions"><button class="action-button" data-action="print-demand" data-id="${d.id}">Print</button>${open ? `<button class="action-button" data-action="done-demand" data-id="${d.id}">Done</button><button class="action-button danger" data-action="delete-demand" data-id="${d.id}">Delete</button>` : ''}</div></td></tr>`;
+  }).join('') : '<tr><td colspan="6"><div class="empty-state"><strong>Abhi koi demand nahi</strong>Roz ki demand yahan banayein aur print karein.</div></td></tr>';
+  return `${heading('Daily Demand', 'Roz ki demand banayein, thermal printer par print karein, phir Done karein.', `${pending ? `<button class="button" data-action="print-all-demand">Print all (${pending})</button><button class="button" data-action="done-all-demand">Done all</button>` : ''}<select id="thermal-width" class="filter-control" aria-label="Printer size"><option value="80">80mm printer</option><option value="58">58mm printer</option></select><button class="button button-primary" data-action="add-demand">+ New demand</button>`)}${totalChips([['Pending demand', pending], ['Pending ki value', money(pendingValue)], ['Done (stock se nikla)', money(doneValue)]])}<section class="panel"><div class="table-scroll"><table><thead><tr><th>DATE</th><th>ITEMS</th><th>LINES</th><th>VALUE</th><th>STATUS</th><th></th></tr></thead><tbody>${rows}</tbody></table></div><div class="table-footer">${state.demands.length} demand${state.demands.length === 1 ? '' : 's'} · Pending <strong>${money(pendingValue)}</strong> · Done <strong>${money(doneValue)}</strong></div></section>`;
 }
 
 function demandRow() {
@@ -190,11 +218,10 @@ function printDemands(ids) {
 }
 window.addEventListener('afterprint', () => document.body.classList.remove('print-thermal'));
 
-function monthRange(ym) { const [y, m] = ym.split('-').map(Number); return [`${ym}-01`, `${ym}-${String(new Date(y, m, 0).getDate()).padStart(2, '0')}`]; }
-
 function renderEmployees() {
   const rows = state.employees.length ? state.employees.map(e => `<tr><td><strong>${esc(e.name)}</strong><span class="cell-sub">${esc(e.role || '')}</span></td><td>${esc(e.phone || '—')}</td><td>${fmtDate(e.join_date)}</td><td>${salaryText(e.salary)} <span class="cell-sub">${e.salary_type === 'daily' ? 'per day' : 'per month'}</span></td><td><span class="badge ${e.active ? 'badge-good' : 'badge-out'}">${e.active ? 'Active' : 'Left'}</span></td><td><div class="table-actions"><button class="action-button" data-action="edit-employee" data-id="${e.id}">Edit</button><button class="action-button danger" data-action="delete-employee" data-id="${e.id}">Delete</button></div></td></tr>`).join('') : '<tr><td colspan="6"><div class="empty-state"><strong>Abhi koi employee nahi</strong>+ Add employee se shuru karein.</div></td></tr>';
-  return `${heading('Employees', 'Staff ki list aur salary.', `${salaryButton()}<button class="button button-primary" data-action="add-employee">+ Add employee</button>`)}<section class="panel"><div class="table-scroll"><table><thead><tr><th>NAME</th><th>PHONE</th><th>JOINED</th><th>SALARY</th><th>STATUS</th><th></th></tr></thead><tbody>${rows}</tbody></table></div><div class="table-footer">${state.employees.length} employees</div></section>`;
+  const working = state.employees.filter(e => e.active), monthlyPayroll = sumBy(working.filter(e => e.salary_type === 'monthly'), e => e.salary), dailyRate = sumBy(working.filter(e => e.salary_type === 'daily'), e => e.salary);
+  return `${heading('Employees', 'Staff ki list aur salary.', `${salaryButton()}<button class="button button-primary" data-action="add-employee">+ Add employee</button>`)}${totalChips([['Kaam kar rahe', working.length], ['Monthly salary (total)', salaryText(monthlyPayroll)], ['Daily rate (sab ka ek din)', salaryText(dailyRate)]])}<section class="panel"><div class="table-scroll"><table><thead><tr><th>NAME</th><th>PHONE</th><th>JOINED</th><th>SALARY</th><th>STATUS</th><th></th></tr></thead><tbody>${rows}</tbody></table></div><div class="table-footer">${state.employees.length} employees</div></section>`;
 }
 
 function employeeForm(e) {
@@ -202,27 +229,27 @@ function employeeForm(e) {
   openModal(e ? 'Edit employee' : 'Add employee', 'Staff member ki details', `<form id="employee-form" data-id="${e?.id || ''}"><div class="form-grid"><label class="span-2">Name<input name="name" required maxlength="100" value="${esc(e?.name || '')}"></label><label>Phone<input name="phone" value="${esc(e?.phone || '')}"></label><label>Role<input name="role" placeholder="Cook, Waiter, Rider" value="${esc(e?.role || '')}"></label><label>Joining date<input name="join_date" type="date" value="${esc(e?.join_date || today())}"></label><label>Salary type<select name="salary_type"><option value="monthly" ${sel('monthly')}>Monthly</option><option value="daily" ${sel('daily')}>Daily</option></select></label><label>Salary (Rs.)<input name="salary" ${e && !state.showSalary ? 'type="password" inputmode="decimal" pattern="[0-9]+(\\.[0-9]{1,2})?" title="Sirf number likhein"' : 'type="number" min="0" step="0.01"'} required value="${esc(e?.salary ?? '')}"></label>${e ? `<label class="span-2"><span><input type="checkbox" name="active" ${e.active ? 'checked' : ''}> Abhi kaam kar raha hai</span></label>` : ''}</div>${modalFooter(e ? 'Save changes' : 'Add employee')}</form>`);
 }
 
+const activeStaff = () => state.employees.filter(e => e.active);
+const attendanceFooter = (staff, entries) => { const t = attendanceTotals(staff, entries); return `${t.marked} of ${t.total} marked · Daily pay: <strong>${salaryText(t.paid)}</strong> Paid · <strong>${salaryText(t.unpaid)}</strong> Unpaid · Total <strong>${salaryText(t.sum)}</strong>`; };
+
+// Current selections on the Attendance page (used for live totals and to keep unsaved choices when the page re-renders).
+function readAttendanceDom() {
+  return new Map($$('#page-content tr[data-emp]').map(tr => [tr.dataset.emp, { status: tr.querySelector('.att-status').value, late_minutes: Number(tr.querySelector('.att-late').value || 0), paid: tr.querySelector('.att-paid')?.value === 'true' }]));
+}
+const refreshAttendanceTotals = () => { const box = $('#att-footer'); if (box) box.innerHTML = attendanceFooter(activeStaff(), readAttendanceDom()); };
+
 function renderAttendance() {
-  const marks = new Map(state.attendance.filter(a => a.date === state.attDate).map(a => [a.employee_id, a])), staff = state.employees.filter(e => e.active);
-  let paidAmt = 0, unpaidAmt = 0;
+  const saved = new Map(state.attendance.filter(a => a.date === state.attDate).map(a => [a.employee_id, a])), staff = activeStaff();
+  const draft = state.attDraft?.date === state.attDate ? state.attDraft.map : null, marks = draft || saved;
   const rows = staff.length ? staff.map(e => {
-    const m = marks.get(e.id), here = m && ['on_time', 'late'].includes(m.status), daily = e.salary_type === 'daily', opt = (v, t) => `<option value="${v}" ${m?.status === v ? 'selected' : ''}>${t}</option>`;
-    if (daily && here) { if (m.paid) paidAmt += Number(e.salary); else unpaidAmt += Number(e.salary); }
-    const pay = daily ? `<select class="att-paid filter-control" ${here ? '' : 'disabled'}><option value="false">Unpaid</option><option value="true" ${m?.paid ? 'selected' : ''}>Paid</option></select> <span class="cell-sub">${salaryText(e.salary)} / day</span>` : '<span class="cell-sub">Monthly salary</span>';
-    return `<tr data-emp="${e.id}"><td><strong>${esc(e.name)}</strong><span class="cell-sub">${esc(e.role || '')}</span></td><td><select class="att-status filter-control"><option value="">Not marked</option>${opt('on_time', 'On time')}${opt('late', 'Late')}${opt('absent', 'Absent')}${opt('leave', 'Leave')}</select></td><td><input class="att-late filter-control" type="number" min="0" step="1" placeholder="Late minutes" value="${m?.status === 'late' ? m.late_minutes : ''}" ${m?.status === 'late' ? '' : 'disabled'}></td><td>${pay}</td></tr>`;
+    const m = marks.get(e.id), here = m && PRESENT.includes(m.status), daily = e.salary_type === 'daily', opt = (v, t) => `<option value="${v}" ${m?.status === v ? 'selected' : ''}>${t}</option>`;
+    const pay = daily ? `<select class="att-paid filter-control" ${here ? '' : 'disabled'}><option value="false">Unpaid</option><option value="true" ${here && m.paid ? 'selected' : ''}>Paid</option></select> <span class="cell-sub">${salaryText(e.salary)} / day</span>` : '<span class="cell-sub">Monthly salary</span>';
+    return `<tr data-emp="${e.id}"><td><strong>${esc(e.name)}</strong><span class="cell-sub">${esc(e.role || '')}</span></td><td><select class="att-status filter-control"><option value="">Not marked</option>${opt('on_time', 'On time')}${opt('late', 'Late')}${opt('absent', 'Absent')}${opt('leave', 'Leave')}</select></td><td><input class="att-late filter-control" type="number" min="0" step="1" placeholder="Late minutes" value="${m?.status === 'late' ? (m.late_minutes || 0) : ''}" ${m?.status === 'late' ? '' : 'disabled'}></td><td>${pay}</td></tr>`;
   }).join('') : '<tr><td colspan="4"><div class="empty-state"><strong>Koi active employee nahi</strong>Pehle Employees page par employee add karein.</div></td></tr>';
-  return `${heading('Attendance', 'Roz ki hazri aur daily pay lagayein.', `<input id="att-date" class="filter-control" type="date" value="${state.attDate}" max="${today()}">${salaryButton()}<button class="button" data-action="all-on-time">Sab On time</button><button class="button button-primary" data-action="save-attendance">Save attendance</button>`)}<section class="panel"><div class="table-scroll"><table><thead><tr><th>EMPLOYEE</th><th>STATUS</th><th>LATE (MINUTES)</th><th>DAILY PAY</th></tr></thead><tbody>${rows}</tbody></table></div><div class="table-footer">${marks.size} of ${staff.length} marked · Daily pay: <strong>${salaryText(paidAmt)}</strong> Paid · <strong>${salaryText(unpaidAmt)}</strong> Unpaid · Total <strong>${salaryText(paidAmt + unpaidAmt)}</strong></div></section>`;
+  return `${heading('Attendance', 'Roz ki hazri aur daily pay lagayein.', `<input id="att-date" class="filter-control" type="date" value="${state.attDate}" max="${today()}">${salaryButton()}<button class="button" data-action="all-on-time">Sab On time</button><button class="button button-primary" data-action="save-attendance">Save attendance</button>`)}<section class="panel"><div class="table-scroll"><table><thead><tr><th>EMPLOYEE</th><th>STATUS</th><th>LATE (MINUTES)</th><th>DAILY PAY</th></tr></thead><tbody>${rows}</tbody></table></div><div id="att-footer" class="table-footer">${attendanceFooter(staff, marks)}</div></section>`;
 }
 
-function staffStats(e) {
-  const rows = state.attendance.filter(a => a.employee_id === e.id), c = st => rows.filter(a => a.status === st).length, [from, to] = monthRange(state.staffMonth);
-  const onTime = c('on_time'), late = c('late'), absent = c('absent'), leave = c('leave'), present = onTime + late, daily = e.salary_type === 'daily';
-  const lateMins = rows.filter(a => a.status === 'late').reduce((t, a) => t + a.late_minutes, 0), days = Number(to.slice(8));
-  const earned = Math.round(daily ? Number(e.salary) * present : Math.max(0, Number(e.salary) - Number(e.salary) / days * absent));
-  const advance = state.advances.filter(a => a.employee_id === e.id && a.date >= from && a.date <= to).reduce((t, a) => t + Number(a.amount), 0);
-  const paid = daily ? Number(e.salary) * rows.filter(a => ['on_time', 'late'].includes(a.status) && a.paid).length : 0;
-  return { onTime, late, absent, leave, present, daily, earned, advance, paid, balance: earned - advance - paid, attPct: present + absent ? present / (present + absent) * 100 : null, onTimePct: present ? onTime / present * 100 : null, avgLate: late ? lateMins / late : null };
-}
+const staffStats = e => calcStaffStats(e, state.attendance, state.advances, state.salaryPayments, state.staffMonth);
 
 function printStaffSlip(employeeId) {
   if (!state.showSalary) return toast('Pehle Show salary dabayein.', true);
@@ -230,31 +257,65 @@ function printStaffSlip(employeeId) {
   const stats = staffStats(employee), [from, to] = monthRange(state.staffMonth);
   const rows = [
     [`Salary rate (${employee.salary_type === 'daily' ? 'per day' : 'per month'})`, number(employee.salary), ''],
+    ['Salary days', `${number(stats.earnedDays)} days`, ''],
     ['Present', `${stats.present} days`, ''],
     ['Absent', `${stats.absent} days`, ''],
     ['Leave', `${stats.leave} days`, ''],
     ['Earned salary', number(stats.earned), ''],
     ['Advance taken', number(stats.advance), ''],
-    ['Already paid', number(stats.paid), '']
+    ['Already paid', `${number(stats.paid)} (${number(stats.paidDays)} days)`, '']
   ];
   printSlip({ title: 'STAFF ACCOUNT', code: `ST-${employee.id.slice(0, 6).toUpperCase()}`, dateText: `${fmtDate(from)} - ${fmtDate(to)}`, note: `${employee.name}${employee.role ? ` | ${employee.role}` : ''}`, head: ['Description', 'Amount', ''], rows, totals: [['Remaining :', number(stats.balance)]], className: 'thermal-account' });
 }
 
+const dayText = n => `${number(n)} din`;
+const pendingBadge = t => t.balance > 0 ? '<span class="badge badge-low">Pending</span>' : t.balance < 0 ? '<span class="badge badge-out">Advance zyada</span>' : '<span class="badge badge-good">Clear</span>';
+
 function renderStaffReport() {
-  const staff = state.employees.filter(e => e.active || state.attendance.some(a => a.employee_id === e.id)), pct = v => v === null ? '—' : `${v.toFixed(0)}%`, sum = { earned: 0, advance: 0, paid: 0, balance: 0 };
-  const rows = staff.length ? staff.map(e => { const t = staffStats(e); Object.keys(sum).forEach(k => sum[k] += t[k]); return `<tr><td><strong>${esc(e.name)}</strong><span class="cell-sub">${esc(e.role || '')}</span></td><td>${t.present} <span class="cell-sub">${t.onTime} on time · ${t.late} late</span></td><td>${t.absent}</td><td>${t.leave}</td><td>${pct(t.attPct)}</td><td>${pct(t.onTimePct)}</td><td>${t.avgLate === null ? '—' : `${t.avgLate.toFixed(0)} min`}</td><td>${salaryText(t.earned)}</td><td>${t.advance ? salaryText(t.advance) : '—'}</td><td>${t.daily ? salaryText(t.paid) : '—'}</td><td><strong>${salaryText(t.balance)}</strong></td><td><button class="action-button" data-action="print-staff-slip" data-id="${e.id}">Print</button></td></tr>`; }).join('') : '<tr><td colspan="12"><div class="empty-state"><strong>Abhi koi data nahi</strong>Employees add karke attendance lagayein.</div></td></tr>';
-  return `${heading('Staff Report', 'Mahine ki hazri, average, advance aur salary ka hisab.', `<input id="staff-month" class="filter-control" type="month" value="${state.staffMonth}"><select id="thermal-width" class="filter-control" aria-label="Printer size"><option value="80">80mm printer</option><option value="58">58mm printer</option></select>${salaryButton()}<button class="button" data-action="print-page">Print report</button>`)}<section class="panel"><div class="table-scroll"><table><thead><tr><th>EMPLOYEE</th><th>PRESENT</th><th>ABSENT</th><th>LEAVE</th><th>ATTENDANCE</th><th>ON TIME</th><th>AVG LATE</th><th>EARNED</th><th>ADVANCE</th><th>PAID</th><th>BALANCE</th><th></th></tr></thead><tbody>${rows}</tbody></table></div><div class="table-footer">Earned <strong>${salaryText(sum.earned)}</strong> · Advance <strong>${salaryText(sum.advance)}</strong> · Paid <strong>${salaryText(sum.paid)}</strong> · Balance (dena baqi) <strong>${salaryText(sum.balance)}</strong></div></section>`;
+  const staff = state.employees.filter(e => e.active || monthAttendance(state.attendance, e.id, state.staffMonth).length || state.advances.some(a => a.employee_id === e.id) || state.salaryPayments.some(p => p.employee_id === e.id)), pct = v => v === null ? '—' : `${v.toFixed(0)}%`;
+  const stats = staff.map(e => [e, staffStats(e)]), sum = staffTotals(stats.map(x => x[1]));
+  const rows = stats.length ? stats.map(([e, t]) => `<tr><td><strong>${esc(e.name)}</strong><span class="cell-sub">${esc(e.role || '')} · ${t.daily ? 'Daily' : 'Monthly'}</span></td><td>${t.present} <span class="cell-sub">${t.onTime} on time · ${t.late} late</span></td><td>${t.absent}</td><td>${t.leave}</td><td>${pct(t.attPct)}</td><td>${pct(t.onTimePct)}</td><td>${t.avgLate === null ? '—' : `${t.avgLate.toFixed(0)} min`}</td><td>${dayText(t.earnedDays)}<span class="cell-sub">${salaryText(t.dayRate)} / din${t.daily ? '' : ` · ${t.monthDays} din ka mahina`}</span></td><td>${salaryText(t.earned)}</td><td>${t.advance ? salaryText(t.advance) : '—'}</td><td>${salaryText(t.paid)}<span class="cell-sub">${dayText(t.paidDays)} ki</span></td><td><strong class="${t.balance > 0 ? 'due' : ''}">${salaryText(t.balance)}</strong><span class="cell-sub">${dayText(t.pendingDays)} baqi</span></td><td>${pendingBadge(t)}</td><td><div class="table-actions"><button class="action-button" data-action="employee-detail" data-id="${e.id}">Details</button><button class="action-button" data-action="print-staff-slip" data-id="${e.id}">Print</button></div></td></tr>`).join('') : '<tr><td colspan="14"><div class="empty-state"><strong>Abhi koi data nahi</strong>Employees add karke attendance lagayein.</div></td></tr>';
+  const chips = totalChips([['Employees', staff.length], ['Total earned', salaryText(sum.earned)], ['Advance', salaryText(sum.advance)], ['Ada ho chuka (Paid)', salaryText(sum.paid)], ['Pending (dena baqi)', salaryText(sum.balance), 'due']]);
+  return `${heading('Staff Report', 'Har employee ki hazri, kitni din ki salary mili aur kitni baqi hai.', `<input id="staff-month" class="filter-control" type="month" value="${state.staffMonth}"><select id="thermal-width" class="filter-control" aria-label="Printer size"><option value="80">80mm printer</option><option value="58">58mm printer</option></select>${salaryButton()}<button class="button" data-action="print-page">Print report</button>`)}${chips}<section class="panel"><div class="table-scroll"><table><thead><tr><th>EMPLOYEE</th><th>PRESENT</th><th>ABSENT</th><th>LEAVE</th><th>ATTENDANCE</th><th>ON TIME</th><th>AVG LATE</th><th>SALARY DAYS</th><th>EARNED</th><th>ADVANCE</th><th>PAID</th><th>PENDING</th><th>STATUS</th><th></th></tr></thead><tbody>${rows}</tbody></table></div><div class="table-footer">Total ${stats.length} employees · Present ${sum.present} din · Absent ${sum.absent} · Leave ${sum.leave} · Earned <strong>${salaryText(sum.earned)}</strong> · Advance <strong>${salaryText(sum.advance)}</strong> · Paid <strong>${salaryText(sum.paid)}</strong> · Pending <strong>${salaryText(sum.balance)}</strong></div></section>`;
+}
+
+// One employee, one month: summary + every attendance day + advances + salary payments.
+function employeeDetail(id) {
+  const e = state.employees.find(x => x.id === id); if (!e) return;
+  const [from, to] = monthRange(state.staffMonth), t = staffStats(e), label = { on_time: 'On time', late: 'Late', absent: 'Absent', leave: 'Leave' };
+  const days = monthAttendance(state.attendance, id, state.staffMonth).sort((a, b) => a.date.localeCompare(b.date));
+  const advances = state.advances.filter(a => a.employee_id === id && a.date >= from && a.date <= to).sort((a, b) => a.date.localeCompare(b.date));
+  const payments = state.salaryPayments.filter(p => p.employee_id === id && paymentMonth(p) === state.staffMonth).sort((a, b) => a.date.localeCompare(b.date));
+  const line = (k, v, cls = '') => `<div class="settings-row"><div><strong>${k}</strong></div><span class="${cls}">${v}</span></div>`;
+  const table = (head, body, empty) => `<div class="table-scroll"><table><thead><tr>${head.map(h => `<th>${h}</th>`).join('')}</tr></thead><tbody>${body || `<tr><td colspan="${head.length}">${empty}</td></tr>`}</tbody></table></div>`;
+  const dayRows = days.map(a => `<tr><td>${fmtDate(a.date)}</td><td>${label[a.status]}${a.status === 'late' ? ` (${a.late_minutes} min)` : ''}</td><td>${t.daily ? (['on_time', 'late'].includes(a.status) ? (a.paid ? '<span class="badge badge-good">Paid</span>' : '<span class="badge badge-low">Unpaid</span>') : '—') : '—'}</td></tr>`).join('');
+  const body = `<div class="settings-list">${line('Salary rate', `${salaryText(e.salary)} ${t.daily ? 'per din' : 'per mahina'}`)}${line('Mahina', `${state.staffMonth} (${t.monthDays} din)`)}${line('Hazri lagi / baqi', `${t.markedDays} din lagi${t.daily ? '' : ' · jis din hazri nahi lagi us ki katoti nahi'}`)}${line('Present / Absent / Leave', `${t.present} / ${t.absent} / ${t.leave}`)}${line('Salary ke din', dayText(t.earnedDays))}${line('Earned salary', salaryText(t.earned))}${line('Advance', salaryText(t.advance))}${line(`Paid (${dayText(t.paidDays)} ki)`, salaryText(t.paid))}${line(`Pending (${dayText(t.pendingDays)} baqi)`, salaryText(t.balance), t.balance > 0 ? 'due' : '')}</div>
+    <h3>Hazri (${days.length} din)</h3>${table(['DATE', 'STATUS', 'DAILY PAY'], dayRows, 'Is mahine koi hazri nahi lagi.')}
+    <h3>Advances</h3>${table(['DATE', 'AMOUNT', 'NOTE'], advances.map(a => `<tr><td>${fmtDate(a.date)}</td><td>${salaryText(a.amount)}</td><td>${esc(a.note || '—')}</td></tr>`).join(''), 'Koi advance nahi.')}
+    ${t.daily ? '' : `<h3>Salary payments</h3>${table(['DATE', 'AMOUNT', 'NOTE'], payments.map(p => `<tr><td>${fmtDate(p.date)}</td><td>${salaryText(p.amount)}</td><td>${esc(p.note || '—')}</td></tr>`).join(''), 'Is mahine ki koi payment nahi.')}`}`;
+  openModal(esc(e.name), `${esc(e.role || 'Employee')} · ${t.daily ? 'Daily' : 'Monthly'} salary`, body);
 }
 
 function renderAdvances() {
   const emps = idMap(state.employees), total = state.advances.reduce((t, a) => t + Number(a.amount), 0);
   const rows = state.advances.length ? state.advances.map(a => `<tr><td>${fmtDate(a.date)}</td><td><strong>${esc(emps.get(a.employee_id)?.name || '—')}</strong></td><td>${salaryText(a.amount)}</td><td>${esc(a.note || '—')}</td><td><div class="table-actions"><button class="action-button danger" data-action="delete-advance" data-id="${a.id}">Delete</button></div></td></tr>`).join('') : '<tr><td colspan="5"><div class="empty-state"><strong>Abhi koi advance nahi</strong>+ Add advance se likhein.</div></td></tr>';
-  return `${heading('Advances', 'Kis ne kab advance liya. Ye mahine ki salary se katta hai.', `${salaryButton()}<button class="button button-primary" data-action="add-advance">+ Add advance</button>`)}<section class="panel"><div class="table-scroll"><table><thead><tr><th>DATE</th><th>EMPLOYEE</th><th>AMOUNT</th><th>NOTE</th><th></th></tr></thead><tbody>${rows}</tbody></table></div><div class="table-footer">${state.advances.length} advances · Total <strong>${salaryText(total)}</strong></div></section>`;
+  return `${heading('Advances', 'Kis ne kab advance liya. Ye mahine ki salary se katta hai.', `${salaryButton()}<button class="button button-primary" data-action="add-advance">+ Add advance</button>`)}${totalChips([['Is mahine ke advances', salaryText(sumBy(state.advances.filter(a => a.date >= monthStart()), a => a.amount))], ['Total advances', salaryText(total)]])}<section class="panel"><div class="table-scroll"><table><thead><tr><th>DATE</th><th>EMPLOYEE</th><th>AMOUNT</th><th>NOTE</th><th></th></tr></thead><tbody>${rows}</tbody></table></div><div class="table-footer">${state.advances.length} advances · Total <strong>${salaryText(total)}</strong></div></section>`;
 }
 
 function advanceForm() {
   const staff = state.employees.filter(e => e.active); if (!staff.length) return toast('Pehle employee add karein.', true);
   openModal('Add advance', 'Employee ne jo advance liya', `<form id="advance-form"><div class="form-grid"><label class="span-2">Employee<select name="employee_id" required>${staff.map(e => `<option value="${e.id}">${esc(e.name)}</option>`).join('')}</select></label><label>Date<input name="date" type="date" value="${today()}" required></label><label>Amount (Rs.)<input name="amount" type="number" min="1" step="0.01" required></label><label class="span-2">Note<input name="note" maxlength="120" placeholder="Optional"></label></div>${modalFooter('Save advance')}</form>`);
+}
+
+function renderSalaryPayments() {
+  const emps = idMap(state.employees), total = round2(state.salaryPayments.reduce((t, p) => t + Math.round(Number(p.amount) * 100), 0) / 100);
+  const rows = state.salaryPayments.length ? state.salaryPayments.map(p => `<tr><td>${fmtDate(p.date)}</td><td><strong>${esc(emps.get(p.employee_id)?.name || '—')}</strong><span class="cell-sub">Salary month: ${esc(paymentMonth(p))}</span></td><td>${salaryText(p.amount)}</td><td>${esc(p.note || '—')}</td><td><div class="table-actions"><button class="action-button danger" data-action="delete-salary-payment" data-id="${p.id}">Delete</button></div></td></tr>`).join('') : '<tr><td colspan="5"><div class="empty-state"><strong>Abhi koi salary payment nahi</strong>+ Record payment se monthly salary ki adaigi save karein.</div></td></tr>';
+  return `${heading('Salary Payments', 'Monthly salary ki har payment employee aur date ke saath save hoti hai.', `${salaryButton()}<button class="button button-primary" data-action="add-salary-payment">+ Record payment</button>`)}${totalChips([['Is mahine di gayi', salaryText(sumBy(state.salaryPayments.filter(p => p.date >= monthStart()), p => p.amount))], ['Total payments', salaryText(total)]])}<section class="panel"><div class="table-scroll"><table><thead><tr><th>DATE</th><th>EMPLOYEE</th><th>AMOUNT</th><th>NOTE</th><th></th></tr></thead><tbody>${rows}</tbody></table></div><div class="table-footer">${state.salaryPayments.length} payments · Total <strong>${salaryText(total)}</strong></div></section>`;
+}
+
+function salaryPaymentForm() {
+  const staff = state.employees.filter(e => e.salary_type === 'monthly'); if (!staff.length) return toast('Pehle monthly salary wala employee add karein.', true);
+  openModal('Record salary payment', 'Monthly salary ki jitni rakam di hai woh likhein', `<form id="salary-payment-form"><div class="form-grid"><label class="span-2">Employee<select name="employee_id" required>${staff.map(e => `<option value="${e.id}">${esc(e.name)}</option>`).join('')}</select></label><label>Date<input name="date" type="date" value="${today()}" required></label><label>Salary month<input name="salary_month" type="month" value="${today().slice(0, 7)}" required></label><label class="span-2">Amount (Rs.)<input name="amount" type="number" min="0.01" step="0.01" required></label><label class="span-2">Note<input name="note" maxlength="120" placeholder="Salary, partial payment, etc."></label></div>${modalFooter('Save payment')}</form>`);
 }
 
 function renderCandidates() {
@@ -283,11 +344,11 @@ function printSlip({ title, code, dateText, note, head, rows, totals, className 
 }
 
 function renderMarket() {
-  const lines = new Map();
+  const lines = new Map(), marketSpent = sumBy(state.marketLists.filter(l => l.status === 'bought'), l => l.total_spent), marketOpen = state.marketLists.filter(l => l.status !== 'bought').length;
   state.marketItems.forEach(i => { const a = lines.get(i.list_id) || []; a.push(i); lines.set(i.list_id, a); });
   const rows = state.marketLists.length ? state.marketLists.map(l => { const ls = lines.get(l.id) || [], done = l.status === 'bought';
     return `<tr><td><strong>${fmtDate(l.date)}</strong>${l.note ? `<span class="cell-sub">${esc(l.note)}</span>` : ''}</td><td>${esc(ls.map(i => `${i.name} × ${number(i.quantity)} ${i.unit}`).join(', ') || '—')}</td><td>${done ? `<strong>${money(l.total_spent)}</strong>` : '—'}</td><td><span class="badge ${done ? 'badge-good' : 'badge-low'}">${done ? 'Bought' : 'To buy'}</span></td><td><div class="table-actions"><button class="action-button" data-action="print-market" data-id="${l.id}">Print</button><button class="action-button" data-action="market-prices" data-id="${l.id}">${done ? 'Edit prices' : 'Prices'}</button><button class="action-button danger" data-action="delete-market" data-id="${l.id}">Delete</button></div></td></tr>`; }).join('') : '<tr><td colspan="5"><div class="empty-state"><strong>Abhi koi market list nahi</strong>Taza saman (sabzi, dhaniya) ki roz ki list yahan banayein.</div></td></tr>';
-  return `${heading('Market Purchase', 'Roz market se kharidne wala taza saman. Ye stock mein nahi jata, sirf kharcha banta hai.', '<button class="button button-primary" data-action="add-market">+ New list</button>')}<section class="panel"><div class="table-scroll"><table><thead><tr><th>DATE</th><th>ITEMS</th><th>SPENT</th><th>STATUS</th><th></th></tr></thead><tbody>${rows}</tbody></table></div><div class="table-footer">${state.marketLists.length} lists</div></section>`;
+  return `${heading('Market Purchase', 'Roz market se kharidne wala taza saman. Ye stock mein nahi jata, sirf kharcha banta hai.', '<button class="button button-primary" data-action="add-market">+ New list</button>')}${totalChips([['Total kharcha (Bought lists)', money(marketSpent)], ['Kharidna baqi (lists)', marketOpen]])}<section class="panel"><div class="table-scroll"><table><thead><tr><th>DATE</th><th>ITEMS</th><th>SPENT</th><th>STATUS</th><th></th></tr></thead><tbody>${rows}</tbody></table></div><div class="table-footer">${state.marketLists.length} lists · Spent <strong>${money(marketSpent)}</strong></div></section>`;
 }
 
 function marketRow() {
@@ -373,13 +434,14 @@ function renderPayables() {
   const sups = idMap(state.suppliers), groups = new Map(), nowMs = new Date(today()).getTime();
   state.purchases.filter(p => billDue(p) > 0).sort((a, b) => a.date.localeCompare(b.date)).forEach(p => { const a = groups.get(p.supplier_id) || []; a.push(p); groups.set(p.supplier_id, a); });
   let all = 0;
+  const pendingBills = state.purchases.filter(p => billDue(p) > 0), billsTotal = sumBy(pendingBills, p => p.total_amount), billsPaid = sumBy(pendingBills, p => p.paid_amount);
   const blocks = [...groups].map(([sid, bills]) => {
     const sup = sups.get(sid), total = bills.reduce((t, p) => t + billDue(p), 0); all += total;
     const rows = bills.map(p => `<tr><td>${fmtDate(p.date)}<span class="cell-sub">${Math.round((nowMs - new Date(p.date).getTime()) / 864e5)} din purana</span></td><td>${esc(billItemsText(p.id) || '—')}</td><td>${money(p.total_amount)}</td><td>${money(p.paid_amount)}</td><td><strong class="due">${money(billDue(p))}</strong></td><td><button class="action-button" data-action="pay-bill" data-id="${p.id}">Pay</button></td></tr>`).join('');
     return `<section class="panel supplier-block"><div class="pay-head"><div><strong>${esc(sup?.name || 'No supplier')}</strong><span class="cell-sub">${esc(sup?.phone || '')} · ${bills.length} pending bill${bills.length === 1 ? '' : 's'}</span></div><div class="pay-total">Total pending <strong class="due">${money(total)}</strong></div><div class="table-actions">${sup ? `<button class="action-button" data-action="pay-supplier" data-id="${sid}">Pay supplier</button>` : ''}<button class="action-button" data-action="print-payable" data-id="${sid}">Print</button></div></div><div class="table-scroll"><table><thead><tr><th>BILL DATE</th><th>ITEMS</th><th>BILL</th><th>PAID</th><th>PENDING</th><th></th></tr></thead><tbody>${rows}</tbody></table></div></section>`;
   }).join('') || '<section class="panel"><div class="empty-state"><strong>Koi pending bill nahi</strong>Saari payments clear hain.</div></section>';
   const hist = state.billPayments.slice(0, 15).map(x => `<tr><td>${fmtDate(x.date)}</td><td>${esc(sups.get(x.supplier_id)?.name || '—')}</td><td>${fmtDate(state.purchases.find(p => p.id === x.purchase_id)?.date)}</td><td><strong>${money(x.amount)}</strong></td><td>${esc(x.note || '—')}</td></tr>`).join('');
-  return `${heading('Pending Bills', 'Supplier ke kitne bill baqi hain aur kitne ada hue.', '')}<div class="chip-row"><span class="chip">Total pending <strong class="due">${money(all)}</strong></span><span class="chip">${groups.size} supplier${groups.size === 1 ? '' : 's'}</span></div>${blocks}${hist ? `<section class="panel"><div class="pay-head"><strong>Pichli payments</strong></div><div class="table-scroll"><table><thead><tr><th>PAID ON</th><th>SUPPLIER</th><th>BILL DATE</th><th>AMOUNT</th><th>NOTE</th></tr></thead><tbody>${hist}</tbody></table></div></section>` : ''}`;
+  return `${heading('Pending Bills', 'Supplier ke kitne bill baqi hain aur kitne ada hue.', '')}${totalChips([['Total pending', money(all), 'due'], ['Un bills ka total', money(billsTotal)], ['Un par ada hua', money(billsPaid)], ['Suppliers', groups.size]])}${blocks}${hist ? `<section class="panel"><div class="pay-head"><strong>Pichli payments</strong></div><div class="table-scroll"><table><thead><tr><th>PAID ON</th><th>SUPPLIER</th><th>BILL DATE</th><th>AMOUNT</th><th>NOTE</th></tr></thead><tbody>${hist}</tbody></table></div></section>` : ''}`;
 }
 
 function payBillForm(id) {
@@ -401,7 +463,7 @@ function renderSuppliers() {
   const totals = new Map(), pendings = new Map();
   state.purchases.forEach(purchase => { totals.set(purchase.supplier_id, (totals.get(purchase.supplier_id) || 0) + Number(purchase.total_amount)); pendings.set(purchase.supplier_id, (pendings.get(purchase.supplier_id) || 0) + billDue(purchase)); });
   const rows = state.suppliers.length ? state.suppliers.map(supplier => `<tr><td><strong>${esc(supplier.name)}</strong></td><td>${esc(supplier.phone || '—')}</td><td>${esc(supplier.address || '—')}</td><td><strong>${money(totals.get(supplier.id))}</strong></td><td>${pendings.get(supplier.id) > 0 ? `<strong class="due">${money(pendings.get(supplier.id))}</strong>` : '—'}</td><td><div class="table-actions"><button class="action-button" data-action="edit-supplier" data-id="${supplier.id}">Edit</button><button class="action-button danger" data-action="delete-supplier" data-id="${supplier.id}">Delete</button></div></td></tr>`).join('') : '<tr><td colspan="6"><div class="empty-state"><strong>No suppliers yet</strong>Add a supplier to attach them to purchases.</div></td></tr>';
-  return `${heading('Suppliers', 'Keep supplier details close to your purchase history.', '<button class="button button-primary" data-action="add-supplier">+ Add supplier</button>')}<section class="panel"><div class="table-scroll"><table><thead><tr><th>SUPPLIER</th><th>PHONE</th><th>ADDRESS</th><th>TOTAL PURCHASE</th><th>PENDING</th><th></th></tr></thead><tbody>${rows}</tbody></table></div><div class="table-footer">${state.suppliers.length} supplier${state.suppliers.length === 1 ? '' : 's'}</div></section>`;
+  return `${heading('Suppliers', 'Keep supplier details close to your purchase history.', '<button class="button button-primary" data-action="add-supplier">+ Add supplier</button>')}<section class="panel"><div class="table-scroll"><table><thead><tr><th>SUPPLIER</th><th>PHONE</th><th>ADDRESS</th><th>TOTAL PURCHASE</th><th>PENDING</th><th></th></tr></thead><tbody>${rows}</tbody></table></div><div class="table-footer">${state.suppliers.length} supplier${state.suppliers.length === 1 ? '' : 's'} · Total purchase <strong>${money(sumBy(state.purchases, p => p.total_amount))}</strong> · Pending <strong class="due">${money(sumBy(state.purchases, billDue))}</strong></div></section>`;
 }
 
 function renderCategories() {
@@ -502,7 +564,7 @@ function categoryForm(category = null) {
 async function saveForm(form, table, values, id) {
   const query = id ? supabase.from(table).update(values).eq('id', id) : supabase.from(table).insert(values);
   const { error } = await query;
-  if (error) throw error;
+  if (error) throw migrationHint(error);
 }
 
 async function handleSubmit(event) {
@@ -531,7 +593,9 @@ async function handleSubmit(event) {
     } else if (form.id === 'employee-form') {
       event.preventDefault(); await saveForm(form, 'employees', { name: data.get('name').trim(), phone: data.get('phone').trim(), role: data.get('role').trim(), salary_type: data.get('salary_type'), salary: Number(data.get('salary')), active: form.dataset.id ? data.has('active') : true, join_date: data.get('join_date') || null }, form.dataset.id); toast('Employee save ho gaya.');
     } else if (form.id === 'advance-form') {
-      event.preventDefault(); await saveForm(form, 'advances', { employee_id: data.get('employee_id'), date: data.get('date'), amount: Number(data.get('amount')), note: data.get('note').trim() }); toast('Advance save ho gaya.');
+      event.preventDefault(); const amount = round2(data.get('amount')); if (!(amount > 0)) throw new Error('Amount zero se zyada honi chahiye'); await saveForm(form, 'advances', { employee_id: data.get('employee_id'), date: data.get('date'), amount, note: data.get('note').trim() }); toast('Advance save ho gaya.');
+    } else if (form.id === 'salary-payment-form') {
+      event.preventDefault(); const amount = round2(data.get('amount')); if (!(amount > 0)) throw new Error('Amount zero se zyada honi chahiye'); await saveForm(form, 'salary_payments', { employee_id: data.get('employee_id'), date: data.get('date'), salary_month: `${data.get('salary_month')}-01`, amount, note: data.get('note').trim() }); toast('Salary payment save ho gayi.');
     } else if (form.id === 'candidate-form') {
       event.preventDefault(); await saveForm(form, 'candidates', { name: data.get('name').trim(), phone: data.get('phone').trim(), role: data.get('role').trim(), salary_type: data.get('salary_type'), expected_salary: Number(data.get('expected_salary')), join_date: data.get('join_date') || null, status: form.dataset.id ? data.get('status') : 'pending', note: data.get('note').trim() }, form.dataset.id); toast('Save ho gaya.');
     } else if (form.id === 'market-form') {
@@ -589,13 +653,13 @@ function refreshInventoryRows() {
   const categoryFilter = $('#inventory-category-filter')?.value || '', statusFilter = $('#inventory-status-filter')?.value || '', categories = idMap(state.categories);
   const filtered = state.items.filter(item => `${item.name} ${categories.get(item.category_id)?.name || ''}`.toLowerCase().includes(state.search.toLowerCase()) && (!categoryFilter || item.category_id === categoryFilter) && (!statusFilter || statusFor(item)[1] === statusFilter));
   $('#inventory-rows').innerHTML = filtered.length ? filtered.map(item => `<tr><td><strong>${esc(item.name)}</strong><span class="cell-sub">${esc(categories.get(item.category_id)?.name || 'Uncategorized')}</span></td><td>${esc(item.unit)}</td><td>${number(item.current_stock)}</td><td>${number(item.minimum_stock)}</td><td>${costLabel(item)}</td><td><strong>${money(Number(item.current_stock) * Number(item.cost_per_unit))}</strong></td><td>${badge(item)}</td><td><div class="table-actions"><button class="action-button" data-action="adjust-stock" data-id="${item.id}">Adjust</button><button class="action-button" data-action="edit-item" data-id="${item.id}">Edit</button><button class="action-button danger" data-action="delete-item" data-id="${item.id}">Delete</button></div></td></tr>`).join('') : '<tr><td colspan="8"><div class="empty-state"><strong>No matching items</strong>Try a different search or filter.</div></td></tr>';
-  const footer = $('.table-footer'); if (footer) footer.textContent = `${filtered.length} of ${state.items.length} items`;
+  const footer = $('.table-footer'); if (footer) footer.innerHTML = `${filtered.length} of ${state.items.length} items · Value <strong>${money(filtered.reduce((t, item) => t + Number(item.current_stock) * Number(item.cost_per_unit), 0))}</strong>`;
 }
 
 document.addEventListener('submit', handleSubmit);
 document.addEventListener('click', async event => {
   const nav = event.target.closest('[data-page]');
-  if (nav) { state.page = nav.dataset.page; state.showSalary = false; $('#sidebar').classList.remove('open'); $('#sidebar-scrim').classList.remove('visible'); render(); return; }
+  if (nav) { state.page = nav.dataset.page; state.showSalary = false; state.attDraft = null; $('#sidebar').classList.remove('open'); $('#sidebar-scrim').classList.remove('visible'); render(); return; }
   const button = event.target.closest('[data-action]'); if (!button) return;
   const id = button.dataset.id;
   try {
@@ -605,11 +669,12 @@ document.addEventListener('click', async event => {
       case 'adjust-stock': adjustmentForm(state.items.find(item => item.id === id)); break;
       case 'open-adjustment': adjustmentForm(); break;
       case 'open-purchase': purchaseForm(); break;
-      case 'toggle-salary': state.showSalary = !state.showSalary; render(); break;
+      case 'toggle-salary': if (state.page === 'attendance') state.attDraft = { date: state.attDate, map: readAttendanceDom() }; state.showSalary = !state.showSalary; render(); break;
       case 'pay-bill': payBillForm(id); break;
       case 'pay-supplier': paySupplierForm(id); break;
       case 'print-payable': printPayable(id); break;
       case 'print-staff-slip': printStaffSlip(id); break;
+      case 'employee-detail': employeeDetail(id); break;
       case 'add-market': marketForm(); break;
       case 'add-market-row': $('#market-rows').insertAdjacentHTML('beforeend', marketRow()); break;
       case 'remove-market-row': if ($$('.market-row').length > 1) button.closest('.market-row').remove(); break;
@@ -627,6 +692,8 @@ document.addEventListener('click', async event => {
       case 'exp-today': state.expFrom = state.expTo = today(); await loadData(); render(); break;
       case 'add-advance': advanceForm(); break;
       case 'delete-advance': await removeRecord('advances', id, 'advance'); break;
+      case 'add-salary-payment': salaryPaymentForm(); break;
+      case 'delete-salary-payment': await removeRecord('salary_payments', id, 'salary payment'); break;
       case 'add-candidate': candidateForm(); break;
       case 'edit-candidate': candidateForm(state.candidates.find(c => c.id === id)); break;
       case 'delete-candidate': await removeRecord('candidates', id, 'candidate'); break;
@@ -639,13 +706,17 @@ document.addEventListener('click', async event => {
       case 'add-employee': employeeForm(); break;
       case 'edit-employee': employeeForm(state.employees.find(e => e.id === id)); break;
       case 'delete-employee': await removeRecord('employees', id, 'employee'); break;
-      case 'all-on-time': $$('.att-status').forEach(sel => { if (!sel.value) sel.value = 'on_time'; }); break;
+      case 'all-on-time': $$('.att-status').forEach(sel => { if (!sel.value) { sel.value = 'on_time'; sel.dispatchEvent(new Event('change', { bubbles: true })); } }); refreshAttendanceTotals(); break;
       case 'print-page': window.print(); break;
       case 'save-attendance': {
-        const rows = $$('#page-content tr[data-emp]').map(tr => { const status = tr.querySelector('.att-status').value; return status && { employee_id: tr.dataset.emp, date: state.attDate, status, late_minutes: status === 'late' ? Number(tr.querySelector('.att-late').value || 0) : 0, paid: ['on_time', 'late'].includes(status) && tr.querySelector('.att-paid')?.value === 'true' }; }).filter(Boolean);
+        const day = state.attDate, rows = $$('#page-content tr[data-emp]').map(tr => {
+          const status = tr.querySelector('.att-status').value, present = PRESENT.includes(status); if (!status) return null;
+          return { employee_id: tr.dataset.emp, date: day, status, late_minutes: status === 'late' ? Math.max(0, Math.floor(Number(tr.querySelector('.att-late').value) || 0)) : 0, paid: present && tr.querySelector('.att-paid')?.value === 'true' };
+        }).filter(Boolean);
         if (!rows.length) return toast('Kam az kam ek employee ki hazri chunein.', true);
-        const { error } = await supabase.from('attendance').upsert(rows, { onConflict: 'employee_id,date' }); if (error) throw error;
-        toast('Attendance save ho gayi.'); await loadData(); render(); break;
+        // One row per employee per date: saving the same day again updates the old row (needs unique(employee_id, date) in the database).
+        const { error } = await supabase.from('attendance').upsert(rows, { onConflict: 'employee_id,date' }); if (error) throw migrationHint(error);
+        state.attDraft = null; toast('Attendance save ho gayi.'); await loadData(); render(); break;
       }
       case 'add-demand': demandForm(); break;
       case 'add-demand-row': $('#demand-rows').insertAdjacentHTML('beforeend', demandRow()); break;
@@ -691,9 +762,10 @@ document.addEventListener('change', event => {
   if (event.target.matches('#purchase-form [name="payment"]')) { const f = $('#purchase-form').elements.paid_amount; f.disabled = event.target.value !== 'partial'; f.required = !f.disabled; if (f.disabled) f.value = ''; }
   if ((event.target.id === 'exp-from' || event.target.id === 'exp-to') && event.target.value) { state[event.target.id === 'exp-from' ? 'expFrom' : 'expTo'] = event.target.value; if (state.expFrom > state.expTo) state.expTo = state.expFrom; loadData().then(render).catch(e => toast(e.message, true)); }
   if ((event.target.id === 'cash-from' || event.target.id === 'cash-to') && event.target.value) { state[event.target.id === 'cash-from' ? 'cashFrom' : 'cashTo'] = event.target.value; if (state.cashFrom && state.cashTo && state.cashFrom > state.cashTo) state[event.target.id === 'cash-from' ? 'cashTo' : 'cashFrom'] = event.target.value; loadData().then(render).catch(e => toast(e.message, true)); }
-  if (event.target.matches('.att-status')) { const late = event.target.closest('tr').querySelector('.att-late'); late.disabled = event.target.value !== 'late'; if (late.disabled) late.value = ''; const pd = event.target.closest('tr').querySelector('.att-paid'); if (pd) { pd.disabled = !['on_time', 'late'].includes(event.target.value); if (pd.disabled) pd.value = 'false'; } }
-  if (event.target.id === 'att-date' && event.target.value) { state.attDate = event.target.value; loadData().then(render).catch(e => toast(e.message, true)); }
-  if (event.target.id === 'staff-month' && event.target.value) { state.staffMonth = event.target.value; state.attDate = event.target.value === today().slice(0, 7) ? today() : `${event.target.value}-01`; loadData().then(render).catch(e => toast(e.message, true)); }
+  if (event.target.matches('.att-status')) { const late = event.target.closest('tr').querySelector('.att-late'); late.disabled = event.target.value !== 'late'; if (late.disabled) late.value = ''; else if (late.value === '') late.value = '0'; const pd = event.target.closest('tr').querySelector('.att-paid'); if (pd) { pd.disabled = !PRESENT.includes(event.target.value); if (pd.disabled) pd.value = 'false'; } refreshAttendanceTotals(); }
+  if (event.target.matches('.att-paid')) refreshAttendanceTotals();
+  if (event.target.id === 'att-date' && event.target.value) { state.attDraft = null; state.attDate = event.target.value; loadData().then(render).catch(e => toast(e.message, true)); }
+  if (event.target.id === 'staff-month' && event.target.value) { state.attDraft = null; state.staffMonth = event.target.value; state.attDate = event.target.value === today().slice(0, 7) ? today() : `${event.target.value}-01`; loadData().then(render).catch(e => toast(e.message, true)); }
   if (event.target.id === 'thermal-width') { try { localStorage.setItem('thermalWidth', event.target.value); } catch {} }
   if (event.target.id === 'inventory-category-filter' || event.target.id === 'inventory-status-filter') refreshInventoryRows();
   if (event.target.id === 'purchase-date-filter') { state.purchaseFilter.date = event.target.value; render(); }

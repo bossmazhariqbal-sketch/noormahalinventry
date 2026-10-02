@@ -99,7 +99,7 @@ Agar demand ka koi saman store mein nahi hai: wo jaldi kharab hone wala ho to **
 ## 3. Staff wala hissa
 
 ### Employees
-Name, phone, **joining date**, role, salary aur salary type (Monthly ya Daily). Jo kaam chhor jaye use Edit karke "Abhi kaam kar raha hai" ka nishan hata dein, is se purani hazri bachi rehti hai. Delete karne par us ki hazri aur advances bhi delete ho jate hain.
+Name, phone, **joining date**, role, salary aur salary type (Monthly ya Daily). Jo kaam chhor jaye use Edit karke "Abhi kaam kar raha hai" ka nishan hata dein, is se purani hazri bachi rehti hai. Delete karne par us ki hazri, advances aur salary payments bhi delete ho jate hain.
 
 Salary Employees, Attendance, Hiring, Advances aur Staff Report mein **stars (Rs. ****)** mein chhupi rehti hai. **Show salary** dabane par nazar aati hai. Doosre page par jate hi dobara chhup jati hai.
 
@@ -114,20 +114,35 @@ Kisi ne advance liya ho to employee, date, amount aur note likhein. Ye us mahine
 - Har active employee ke saamne chunein: **On time / Late / Absent / Leave**. Late par late minutes likhein.
 - **Sab On time** se khali employees ek click mein On time ho jate hain.
 - **Daily pay:** jin employees ki salary type Daily hai un ke saamne **Paid / Unpaid** chunein (sirf On time ya Late wale din). Neeche us din ka total Paid, Unpaid aur Total dikhta hai.
-- **Save attendance**. Usi din dobara save karne par purani entry update hoti hai.
+- **Save attendance**. Usi din dobara save karne par purani entry update hoti hai (ek employee ki ek date par ek hi entry, duplicate nahi banti). Purani date (doosre mahine ki bhi) chun kar save karein to wo date wapas load ho kar nazar aati hai.
+- Status badalte hi neeche Paid / Unpaid / Total foran update hota hai. **Show salary** dabane se abhi save na hui selections nahi jatin.
+- **Salary Payments** page par monthly salary ki har partial ya full payment employee, date, **Salary month**, amount aur note ke saath record karein. Salary month wo mahina hai jis ki salary di ja rahi hai (masalan 1 March ko February ki salary: date = 1 March, Salary month = February). Payment list mein dikhti hai aur Delete ho sakti hai. Daily salary ki Paid/Unpaid entry Attendance mein save hoti hai.
+
+### Har page par rupees ke totals
+- **Dashboard** ("Is mahine ka paisa"): JazzCash/QR se kitna aaya; supplier ko kitna diya, Market, Kharche, Staff salary aur Advance mein kitna laga; total laga; supplier ka udhaar kitna baqi. Cash sale record nahi hoti, is liye "Aaya" sirf JazzCash/QR hai.
+- **Inventory:** items, stock ki total value (stock x cost), low/out of stock.
+- **Purchases:** total purchase, Paid, Pending (filter ke mutabiq).
+- **Daily Demand:** har demand ki value (quantity x item ki maujooda cost, andaza), Pending aur Done ka total.
+- **Market Purchase:** Bought lists ka total kharcha. **Expenses:** category-wise, Market aur Total. **JazzCash:** range total.
+- **Pending Bills / Suppliers:** total bill, ada hua, baqi.
+- **Employees, Advances, Salary Payments:** monthly payroll, is mahine ke advances aur payments.
 
 ### Staff Report (mahine ke hisab se)
+- Har employee ki apni row: Present / Absent / Leave, **Salary days** (kitne din ki salary bani), Earned, Advance, **Paid** (kitni rakam aur kitne din ki), **Pending** (kitni rakam aur kitne din baqi) aur status (Pending / Clear / Advance zyada).
+- Sab se neeche aur upar **sab employees ka total**.
+- **Details** dabayein: us employee ke mahine ki poori tafseel (har din ki hazri, daily Paid/Unpaid, advances, salary payments).
+- Per day rate: Daily = salary. Monthly = salary / mahine ke din.
 - **Present** = On time + Late
 - **Attendance %** = Present / (Present + Absent). Leave is hisab mein nahi.
 - **On time %** = On time / Present
 - **Avg late** = late minutes ka total / late din
 - **Est. salary:**
-  - Monthly: salary - (salary / mahine ke din x absent din). Leave ki katoti nahi.
+  - Monthly: salary - (salary / mahine ke din x absent din). Leave ki katoti nahi. Saari rakam 2 decimal tak round hoti hai.
   - Daily: salary x present din.
-  - **Advance** = us mahine ke advances. **Paid** = daily wale employees ke Paid din x daily salary. **Balance** = Earned - Advance - Paid, yaani abhi dena baqi.
+  - **Advance** = us mahine ke advances. **Paid** = daily employees ke Attendance par Paid din ki rakam, ya monthly employees ki us **Salary month** ki Salary Payments. **Balance** = Earned - Advance - Paid, yaani abhi dena baqi.
   - Jis din hazri nahi lagi us din ki katoti nahi hoti, is liye roz hazri lagana zaroori hai.
 - Har employee ke saamne **Print** se us mahine ka alag salary statement thermal printer par nikalein ya browser print dialog mein **Save as PDF** chunein. Statement mein salary rate, present, absent, leave, earned salary, advance, paid aur remaining alag dikhte hain. Salary chhupi ho to pehle **Show salary** karein. 58mm/80mm size Staff Report par chuna ja sakta hai.
-- Ye andaza hai. Bonus ya late ki katoti shamil nahi. Monthly salary ka alag "paid" record nahi rakha gaya, Balance mein sirf Advance ki katoti hoti hai.
+- Ye andaza hai. Bonus ya late ki katoti shamil nahi. Monthly salary ki payment history Salary Payments page mein save hoti hai.
 
 ---
 
@@ -138,17 +153,26 @@ Kisi ne advance liya ho to employee, date, amount aur note likhein. Ye us mahine
 - Supplier udhaar: `bill_payments` (aur `purchases.paid_amount`)
 - Market aur kharche: `market_lists`, `market_items`, `expenses`
 - Incoming JazzCash/QR payments: `jazzcash_payments`
-- Staff: `employees`, `attendance`, `candidates` (hiring), `advances`
+- Staff: `employees`, `attendance`, `candidates` (hiring), `advances`, `salary_payments`
 
 Functions `record_purchase`, `adjust_stock`, `save_demand`, `complete_demand`, `save_market_list`, `complete_market_list`, `pay_bill`, `pay_supplier` stock ko mehfooz tareeqe se badalte hain. Ye ek transaction mein chalte hain, is liye error aaye to aadha data save nahi hota.
 
-SQL files: `supabase/schema.sql` (inventory), `supabase/demand_staff.sql` (demand, staff, market, kharche), `supabase/pending_bills.sql` (supplier udhaar), aur `supabase/jazzcash_payments.sql` (JazzCash/QR payments). Naye project par is tarteeb se chalayein: `schema.sql`, `demand_staff.sql`, `pending_bills.sql`, `jazzcash_payments.sql`. Existing Supabase project par JazzCash tab use karne se pehle `jazzcash_payments.sql` SQL Editor mein run karein.
+SQL files: `supabase/schema.sql` (inventory), `supabase/demand_staff.sql` (demand, staff, market, kharche), `supabase/pending_bills.sql` (supplier udhaar), `supabase/jazzcash_payments.sql` (JazzCash/QR payments), aur `supabase/employee_salary_payments.sql` (attendance compatibility aur monthly salary payment history). Naye project par is tarteeb se chalayein: `schema.sql`, `demand_staff.sql`, `pending_bills.sql`, `jazzcash_payments.sql`, `employee_salary_payments.sql`. **Existing Supabase project par (staff migration):**
+1. Supabase > SQL Editor > New query.
+2. `employee_salary_payments.sql` ka poora text paste karke **Run** dabayein. Ye dobara chalane par bhi safe hai.
+3. Ye file: `attendance.paid` column lagati hai, purani duplicate attendance (same employee + date) hata kar sab se nayi rakhti hai, `unique (employee_id, date)` index banati hai, `salary_payments` table aur `salary_month` column banati/badalti hai, RLS policy aur grants (sirf signed-in owner) lagati hai.
+4. Check (alag run karein): `select employee_id, date, count(*) from public.attendance group by 1, 2 having count(*) > 1;` ka natija khali hona chahiye.
+5. App ko refresh karein (Ctrl+F5).
+
+Agar app mein "relation salary_payments does not exist" ya "no unique constraint matching ON CONFLICT" jaisa error aaye to is ka matlab hai ye SQL abhi run nahi hui.
 
 ---
 
+Calculation ke tests: `node --test` (Node 18+, koi install nahi). Ye `staff-calc.js` ke formulas (salary, rounding, paid, balance) check karte hain.
+
 ## 5. Setup
 
-1. Supabase project banayein, SQL Editor mein dono SQL files chalayein.
+1. Supabase project banayein, SQL Editor mein upar di hui SQL files isi tarteeb se chalayein.
 2. `index.html` mein `supabaseUrl` aur `supabaseAnonKey` apni values se badlein (Project Settings > API). Sirf anon/publishable key, service-role key kabhi nahi.
 3. Authentication > Users mein apna account banayein, sign-up band karein.
 4. Folder Vercel par deploy karein (Framework: Other, build command khali).
@@ -170,5 +194,4 @@ Local par chalane ke liye: `npx serve .` (file seedhi kholne se kaam nahi karta)
 ## 7. Hadood
 
 - Ye accounting ya payment system nahi hai.
-- Monthly salary ki payment history nahi rakhi gayi (daily wale ke din Paid/Unpaid lagte hain).
 - Supabase ek baar mein 1000 rows deta hai. Bohat purane purchase data ke liye baad mein paging chahiye ho sakti hai.
