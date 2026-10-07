@@ -120,10 +120,10 @@ Kisi ne advance liya ho to employee, date, amount aur note likhein. Ye us mahine
 
 ### Har page par rupees ke totals
 - **Dashboard** ("Is mahine ka paisa"): JazzCash/QR se kitna aaya; supplier ko kitna diya, Market, Kharche, Staff salary aur Advance mein kitna laga; total laga; supplier ka udhaar kitna baqi. Cash sale record nahi hoti, is liye "Aaya" sirf JazzCash/QR hai.
-- **Inventory:** items, stock ki total value (stock x cost), low/out of stock.
+- **Inventory:** items, stock ki total value (stock x cost), low/out of stock. Inventory page se at/below-minimum low-stock list aur minimum se zyada stock wale items ki list 58mm/80mm thermal printer par print karein.
 - **Purchases:** total purchase, Paid, Pending (filter ke mutabiq).
 - **Daily Demand:** har demand ki value (quantity x item ki maujooda cost, andaza), Pending aur Done ka total.
-- **Market Purchase:** Bought lists ka total kharcha. **Expenses:** category-wise, Market aur Total. **JazzCash:** range total.
+- **Market Purchase:** Bought lists ka total kharcha; saved list ko Edit list se date, note aur items samet badal sakte hain. Changed/added items ki purani amount reset hoti hai; unchanged items ki amount rehti hai. **Expenses:** category-wise, Market aur Total. **JazzCash:** range total.
 - **Pending Bills / Suppliers:** total bill, ada hua, baqi.
 - **Employees, Advances, Salary Payments:** monthly payroll, is mahine ke advances aur payments.
 
@@ -155,7 +155,7 @@ Kisi ne advance liya ho to employee, date, amount aur note likhein. Ye us mahine
 - Incoming JazzCash/QR payments: `jazzcash_payments`
 - Staff: `employees`, `attendance`, `candidates` (hiring), `advances`, `salary_payments`
 
-Functions `record_purchase`, `adjust_stock`, `save_demand`, `complete_demand`, `save_market_list`, `complete_market_list`, `pay_bill`, `pay_supplier` stock ko mehfooz tareeqe se badalte hain. Ye ek transaction mein chalte hain, is liye error aaye to aadha data save nahi hota.
+Functions `record_purchase`, `adjust_stock`, `save_demand`, `complete_demand`, `save_market_list`, `update_market_list`, `complete_market_list`, `pay_bill`, `pay_supplier` stock/data ko mehfooz tareeqe se badalte hain. Ye ek transaction mein chalte hain, is liye error aaye to aadha data save nahi hota.
 
 SQL files: `supabase/schema.sql` (inventory), `supabase/demand_staff.sql` (demand, staff, market, kharche), `supabase/pending_bills.sql` (supplier udhaar), `supabase/jazzcash_payments.sql` (JazzCash/QR payments), aur `supabase/employee_salary_payments.sql` (attendance compatibility aur monthly salary payment history). Naye project par is tarteeb se chalayein: `schema.sql`, `demand_staff.sql`, `pending_bills.sql`, `jazzcash_payments.sql`, `employee_salary_payments.sql`. **Existing Supabase project par (staff migration):**
 1. Supabase > SQL Editor > New query.
@@ -163,6 +163,8 @@ SQL files: `supabase/schema.sql` (inventory), `supabase/demand_staff.sql` (deman
 3. Ye file: `attendance.paid` column lagati hai, purani duplicate attendance (same employee + date) hata kar sab se nayi rakhti hai, `unique (employee_id, date)` index banati hai, `salary_payments` table aur `salary_month` column banati/badalti hai, RLS policy aur grants (sirf signed-in owner) lagati hai.
 4. Check (alag run karein): `select employee_id, date, count(*) from public.attendance group by 1, 2 having count(*) > 1;` ka natija khali hona chahiye.
 5. App ko refresh karein (Ctrl+F5).
+
+Existing project par Market Purchase ki saved lists edit karne ke liye Supabase SQL Editor mein `supabase/demand_staff.sql` dobara run karein, phir app ko refresh karein. Script ki tables, indexes aur functions repeat-run ke liye safe hain.
 
 Agar app mein "relation salary_payments does not exist" ya "no unique constraint matching ON CONFLICT" jaisa error aaye to is ka matlab hai ye SQL abhi run nahi hui.
 

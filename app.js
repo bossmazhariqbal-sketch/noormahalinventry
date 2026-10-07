@@ -20,6 +20,7 @@ const number = value => Number(value || 0).toLocaleString('en-PK', { maximumFrac
 const today = () => { const date = new Date(); return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`; };
 const monthStart = (date = new Date()) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-01`;
 const esc = value => String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]);
+const truncateText = (value, maxLength = 40) => { const text = String(value ?? ''); return text.length > maxLength ? `${text.slice(0, maxLength - 3)}...` : text; };
 const idMap = (rows, key = 'id') => new Map(rows.map(row => [row[key], row]));
 const sumBy = (rows, pick) => round2(rows.reduce((t, row) => t + Math.round((Number(pick(row)) || 0) * 100), 0) / 100);
 // Row of rupee totals shown at the top of a page: [label, value, extra class].
@@ -157,7 +158,7 @@ function renderInventory() {
   const categoryOptions = state.categories.map(category => `<option value="${esc(category.id)}">${esc(category.name)}</option>`).join('');
   const rows = filtered.length ? filtered.map(item => `<tr><td><strong>${esc(item.name)}</strong><span class="cell-sub">${esc(categories.get(item.category_id)?.name || 'Uncategorized')}</span></td><td>${esc(item.unit)}</td><td>${number(item.current_stock)}</td><td>${number(item.minimum_stock)}</td><td>${costLabel(item)}</td><td><strong>${money(Number(item.current_stock) * Number(item.cost_per_unit))}</strong></td><td>${badge(item)}</td><td><div class="table-actions"><button class="action-button" data-action="adjust-stock" data-id="${item.id}">Adjust</button><button class="action-button" data-action="edit-item" data-id="${item.id}">Edit</button><button class="action-button danger" data-action="delete-item" data-id="${item.id}" aria-label="Delete ${esc(item.name)}">Delete</button></div></td></tr>`).join('') : `<tr><td colspan="8"><div class="empty-state"><strong>${state.items.length ? 'No matching items' : 'Your inventory is empty'}</strong>${state.items.length ? 'Try another search or category.' : 'Add your first item to get started.'}</div></td></tr>`;
   const stockValue = rows => round2(rows.reduce((t, item) => t + Number(item.current_stock) * Number(item.cost_per_unit), 0));
-  return `${heading('Inventory', 'Keep an eye on quantities, costs, and stock levels.', '<button class="button" data-action="open-adjustment">Adjust stock</button><button class="button button-primary" data-action="add-item">+ Add item</button>')}${totalChips([['Items', state.items.length], ['Stock ki total value', money(stockValue(state.items))], ['Low stock', state.items.filter(i => statusFor(i)[1] === 'low').length, 'due'], ['Out of stock', state.items.filter(i => statusFor(i)[1] === 'out').length, 'due']])}<section class="panel"><div class="table-toolbar"><label class="field-search"><input id="inventory-search" type="search" value="${esc(state.search)}" placeholder="Search item name..."></label><select id="inventory-category-filter" class="filter-control"><option value="">All categories</option>${categoryOptions}</select><select id="inventory-status-filter" class="filter-control"><option value="">All stock status</option><option value="good">In Stock</option><option value="low">Low Stock</option><option value="out">Out of Stock</option></select></div><div class="table-scroll"><table><thead><tr><th>ITEM</th><th>UNIT</th><th>STOCK</th><th>MINIMUM</th><th>COST / UNIT</th><th>TOTAL VALUE</th><th>STATUS</th><th></th></tr></thead><tbody id="inventory-rows">${rows}</tbody></table></div><div class="table-footer">${filtered.length} of ${state.items.length} items · Value <strong>${money(stockValue(filtered))}</strong></div></section>`;
+  return `${heading('Inventory', 'Keep an eye on quantities, costs, and stock levels.', `<button class="button" data-action="print-inventory" data-status="low">Print low stock</button><button class="button" data-action="print-inventory" data-status="good">Print in-stock</button>${thermalWidthSelect()}<button class="button" data-action="open-adjustment">Adjust stock</button><button class="button button-primary" data-action="add-item">+ Add item</button>`)}${totalChips([['Items', state.items.length], ['Stock ki total value', money(stockValue(state.items))], ['Low stock', state.items.filter(i => statusFor(i)[1] === 'low').length, 'due'], ['Out of stock', state.items.filter(i => statusFor(i)[1] === 'out').length, 'due']])}<section class="panel"><div class="table-toolbar"><label class="field-search"><input id="inventory-search" type="search" value="${esc(state.search)}" placeholder="Search item name..."></label><select id="inventory-category-filter" class="filter-control"><option value="">All categories</option>${categoryOptions}</select><select id="inventory-status-filter" class="filter-control"><option value="">All stock status</option><option value="good">In Stock</option><option value="low">Low Stock</option><option value="out">Out of Stock</option></select></div><div class="table-scroll"><table><thead><tr><th>ITEM</th><th>UNIT</th><th>STOCK</th><th>MINIMUM</th><th>COST / UNIT</th><th>TOTAL VALUE</th><th>STATUS</th><th></th></tr></thead><tbody id="inventory-rows">${rows}</tbody></table></div><div class="table-footer">${filtered.length} of ${state.items.length} items · Value <strong>${money(stockValue(filtered))}</strong></div></section>`;
 }
 
 function renderPurchases() {
@@ -174,6 +175,25 @@ function renderPurchases() {
 }
 
 function thermalWidth() { try { return localStorage.getItem('thermalWidth') === '58' ? '58' : '80'; } catch { return '80'; } }
+function thermalWidthSelect() { const width = thermalWidth(); return `<select id="thermal-width" class="filter-control" aria-label="Printer size"><option value="80" ${width === '80' ? 'selected' : ''}>80mm printer</option><option value="58" ${width === '58' ? 'selected' : ''}>58mm printer</option></select>`; }
+
+function printInventory(status) {
+  const matching = state.items.filter(item => status === 'low'
+    ? Number(item.current_stock) <= Number(item.minimum_stock)
+    : statusFor(item)[1] === 'good');
+  if (!matching.length) return toast(status === 'low' ? 'Koi low-stock item print karne ke liye nahi hai.' : 'Koi in-stock item print karne ke liye nahi hai.', true);
+  const low = status === 'low';
+  printSlip({
+    title: low ? 'LOW STOCK ITEMS' : 'IN-STOCK ITEMS',
+    code: low ? 'ST-LOW' : 'ST-AVAILABLE',
+    dateText: fmtDate(today()),
+    note: low ? 'Stock at ya minimum se neeche' : 'Stock minimum se upar',
+    head: ['Item', 'Stock', 'Minimum'],
+    rows: matching.map(item => [item.name, `${number(item.current_stock)} ${item.unit}`, `${number(item.minimum_stock)} ${item.unit}`]),
+    totals: [['Total items :', String(matching.length)]],
+    columnLayout: 'stock'
+  });
+}
 
 function renderDemand() {
   const items = idMap(state.items), lines = new Map(), pending = state.demands.filter(d => d.status === 'open').length;
@@ -186,7 +206,7 @@ function renderDemand() {
     const text = ls.map(l => `${items.get(l.item_id)?.name || 'Item'} × ${number(l.quantity)}`).join(', ');
     return `<tr><td><strong>${esc(d.date)}</strong>${d.note ? `<span class="cell-sub">${esc(d.note)}</span>` : ''}</td><td>${esc(text || '—')}</td><td>${ls.length}</td><td><strong>${money(value)}</strong></td><td><span class="badge ${open ? 'badge-low' : 'badge-good'}">${open ? 'Pending' : 'Done'}</span></td><td><div class="table-actions"><button class="action-button" data-action="print-demand" data-id="${d.id}">Print</button>${open ? `<button class="action-button" data-action="done-demand" data-id="${d.id}">Done</button><button class="action-button danger" data-action="delete-demand" data-id="${d.id}">Delete</button>` : ''}</div></td></tr>`;
   }).join('') : '<tr><td colspan="6"><div class="empty-state"><strong>Abhi koi demand nahi</strong>Roz ki demand yahan banayein aur print karein.</div></td></tr>';
-  return `${heading('Daily Demand', 'Roz ki demand banayein, thermal printer par print karein, phir Done karein.', `${pending ? `<button class="button" data-action="print-all-demand">Print all (${pending})</button><button class="button" data-action="done-all-demand">Done all</button>` : ''}<select id="thermal-width" class="filter-control" aria-label="Printer size"><option value="80">80mm printer</option><option value="58">58mm printer</option></select><button class="button button-primary" data-action="add-demand">+ New demand</button>`)}${totalChips([['Pending demand', pending], ['Pending ki value', money(pendingValue)], ['Done (stock se nikla)', money(doneValue)]])}<section class="panel"><div class="table-scroll"><table><thead><tr><th>DATE</th><th>ITEMS</th><th>LINES</th><th>VALUE</th><th>STATUS</th><th></th></tr></thead><tbody>${rows}</tbody></table></div><div class="table-footer">${state.demands.length} demand${state.demands.length === 1 ? '' : 's'} · Pending <strong>${money(pendingValue)}</strong> · Done <strong>${money(doneValue)}</strong></div></section>`;
+  return `${heading('Daily Demand', 'Roz ki demand banayein, thermal printer par print karein, phir Done karein.', `${pending ? `<button class="button" data-action="print-all-demand">Print all (${pending})</button><button class="button" data-action="done-all-demand">Done all</button>` : ''}${thermalWidthSelect()}<button class="button button-primary" data-action="add-demand">+ New demand</button>`)}${totalChips([['Pending demand', pending], ['Pending ki value', money(pendingValue)], ['Done (stock se nikla)', money(doneValue)]])}<section class="panel"><div class="table-scroll"><table><thead><tr><th>DATE</th><th>ITEMS</th><th>LINES</th><th>VALUE</th><th>STATUS</th><th></th></tr></thead><tbody>${rows}</tbody></table></div><div class="table-footer">${state.demands.length} demand${state.demands.length === 1 ? '' : 's'} · Pending <strong>${money(pendingValue)}</strong> · Done <strong>${money(doneValue)}</strong></div></section>`;
 }
 
 function demandRow() {
@@ -338,7 +358,9 @@ function printSlip({ title, code, dateText, note, head, rows, totals, className 
   box.style.width = `${w === '58' ? 55 : 77}mm`;
   const cols = (a, b, c, cls = '') => columnLayout === 'numbered'
     ? `<div class="t-line-row ${cls}"><span class="t-count">${esc(a)}</span><span class="t-desc">${esc(b)}</span><span class="t-amount">${esc(c)}</span></div>`
-    : `<div class="t-line-row ${cls}"><span class="t-desc">${esc(a)}</span><span class="t-q">${esc(b)}</span><span class="t-u">${esc(c)}</span></div>`;
+    : columnLayout === 'stock' && cls === 't-item'
+      ? `<div class="t-stock-item"><strong>${esc(a)}</strong><span>Stock: ${esc(b)} · Min: ${esc(c)}</span></div>`
+      : `<div class="t-line-row ${cls}"><span class="t-desc">${esc(a)}</span><span class="t-q">${esc(b)}</span><span class="t-u">${esc(c)}</span></div>`;
   box.innerHTML = `<div class="t-name">NOOR MEHAL<br>PIZZA HUT</div><div class="t-addr">Sargodha Road, Sacha Sauda Farooqabad, Lahore, Pakistan<br>0304-6006494 | 0347-1144404</div><div class="t-dash"></div><div class="t-line-row"><span>Prepared by: Admin</span><strong>${esc(dateText)}</strong></div><div class="t-dash"></div><div class="t-title">${esc(title)}</div><div class="t-line-row"><strong>${esc(code)}</strong><strong>${time}</strong></div>${note ? `<div>Note: ${esc(note)}</div>` : ''}<div class="t-solid"></div>${cols(...head, 't-head')}<div class="t-solid"></div>${rows.map(r => cols(...r, 't-item')).join('')}<div class="t-dash"></div>${totals.map(([k, v], i) => `<div class="t-line-row ${i === totals.length - 1 ? 't-total' : ''}"><span>${esc(k)}</span><span>${esc(v)}</span></div>`).join('')}<div class="t-dash"></div>`;
   document.body.classList.add('print-thermal'); window.print();
 }
@@ -347,17 +369,20 @@ function renderMarket() {
   const lines = new Map(), marketSpent = sumBy(state.marketLists.filter(l => l.status === 'bought'), l => l.total_spent), marketOpen = state.marketLists.filter(l => l.status !== 'bought').length;
   state.marketItems.forEach(i => { const a = lines.get(i.list_id) || []; a.push(i); lines.set(i.list_id, a); });
   const rows = state.marketLists.length ? state.marketLists.map(l => { const ls = lines.get(l.id) || [], done = l.status === 'bought';
-    return `<tr><td><strong>${fmtDate(l.date)}</strong>${l.note ? `<span class="cell-sub">${esc(l.note)}</span>` : ''}</td><td>${esc(ls.map(i => `${i.name} × ${number(i.quantity)} ${i.unit}`).join(', ') || '—')}</td><td>${done ? `<strong>${money(l.total_spent)}</strong>` : '—'}</td><td><span class="badge ${done ? 'badge-good' : 'badge-low'}">${done ? 'Bought' : 'To buy'}</span></td><td><div class="table-actions"><button class="action-button" data-action="print-market" data-id="${l.id}">Print</button><button class="action-button" data-action="market-prices" data-id="${l.id}">${done ? 'Edit prices' : 'Prices'}</button><button class="action-button danger" data-action="delete-market" data-id="${l.id}">Delete</button></div></td></tr>`; }).join('') : '<tr><td colspan="5"><div class="empty-state"><strong>Abhi koi market list nahi</strong>Taza saman (sabzi, dhaniya) ki roz ki list yahan banayein.</div></td></tr>';
+    const itemsText = ls.map(i => `${i.name} × ${number(i.quantity)} ${i.unit}`).join(', ') || '—';
+    return `<tr><td><strong>${fmtDate(l.date)}</strong>${l.note ? `<span class="cell-sub">${esc(l.note)}</span>` : ''}</td><td title="${esc(itemsText)}">${esc(truncateText(itemsText))}</td><td>${done ? `<strong>${money(l.total_spent)}</strong>` : '—'}</td><td><span class="badge ${done ? 'badge-good' : 'badge-low'}">${done ? 'Bought' : 'To buy'}</span></td><td><div class="table-actions"><button class="action-button" data-action="print-market" data-id="${l.id}">Print</button><button class="action-button" data-action="edit-market" data-id="${l.id}">Edit list</button><button class="action-button" data-action="market-prices" data-id="${l.id}">${done ? 'Edit prices' : 'Prices'}</button><button class="action-button danger" data-action="delete-market" data-id="${l.id}">Delete</button></div></td></tr>`; }).join('') : '<tr><td colspan="5"><div class="empty-state"><strong>Abhi koi market list nahi</strong>Taza saman (sabzi, dhaniya) ki roz ki list yahan banayein.</div></td></tr>';
   return `${heading('Market Purchase', 'Roz market se kharidne wala taza saman. Ye stock mein nahi jata, sirf kharcha banta hai.', '<button class="button button-primary" data-action="add-market">+ New list</button>')}${totalChips([['Total kharcha (Bought lists)', money(marketSpent)], ['Kharidna baqi (lists)', marketOpen]])}<section class="panel"><div class="table-scroll"><table><thead><tr><th>DATE</th><th>ITEMS</th><th>SPENT</th><th>STATUS</th><th></th></tr></thead><tbody>${rows}</tbody></table></div><div class="table-footer">${state.marketLists.length} lists · Spent <strong>${money(marketSpent)}</strong></div></section>`;
 }
 
-function marketRow() {
-  return `<div class="market-row"><input name="name" list="market-names" required maxlength="100" placeholder="Item (jaise Tamatar)"><input name="quantity" type="number" min="0.001" step="0.001" required placeholder="Qty"><input name="unit" list="market-units" required maxlength="20" pattern="[^0-9].*" title="Sirf unit likhein, jaise KG" placeholder="KG"><button class="action-button danger" type="button" data-action="remove-market-row" aria-label="Remove row">×</button></div>`;
+function marketRow(item = null) {
+  return `<div class="market-row"><input type="hidden" name="item_id" value="${esc(item?.id || '')}"><input name="name" list="market-names" required maxlength="100" placeholder="Item (jaise Tamatar)" value="${esc(item?.name || '')}"><input name="quantity" type="number" min="0.001" step="0.001" required placeholder="Qty" value="${item ? esc(item.quantity) : ''}"><input name="unit" list="market-units" required maxlength="20" pattern="[^0-9].*" title="Sirf unit likhein, jaise KG" placeholder="KG" value="${esc(item?.unit || '')}"><button class="action-button danger" type="button" data-action="remove-market-row" aria-label="Remove row">×</button></div>`;
 }
 
-function marketForm() {
+function marketForm(list = null) {
   const names = [...new Set(state.marketItems.map(i => i.name))].map(n => `<option value="${esc(n)}">`).join('');
-  openModal('New market list', 'Jo taza saman aaj market se lena hai', `<form id="market-form"><div class="form-grid"><label>Date<input name="date" type="date" value="${today()}" required></label><label>Note<input name="note" maxlength="120" placeholder="Optional"></label></div><div id="market-rows" class="demand-rows">${marketRow()}</div><button class="button button-small" type="button" data-action="add-market-row">+ Add item</button><datalist id="market-names">${names}</datalist><datalist id="market-units"><option value="KG"><option value="Gram"><option value="Dozen"><option value="Piece"><option value="Bunch"><option value="Packet"></datalist>${modalFooter('Save list')}</form>`);
+  const items = list ? state.marketItems.filter(i => i.list_id === list.id) : [];
+  const rows = items.length ? items.map(marketRow).join('') : marketRow();
+  openModal(list ? 'Edit market list' : 'New market list', list?.status === 'bought' ? 'Changed items ki purani amount reset ho jayegi; unchanged items ki amount barqarar rahegi.' : 'Jo taza saman aaj market se lena hai', `<form id="market-form" data-id="${list?.id || ''}"><div class="form-grid"><label>Date<input name="date" type="date" value="${esc(list?.date || today())}" required></label><label>Note<input name="note" maxlength="120" placeholder="Optional" value="${esc(list?.note || '')}"></label></div><div id="market-rows" class="demand-rows">${rows}</div><button class="button button-small" type="button" data-action="add-market-row">+ Add item</button><datalist id="market-names">${names}</datalist><datalist id="market-units"><option value="KG"><option value="Gram"><option value="Dozen"><option value="Piece"><option value="Bunch"><option value="Packet"></datalist>${modalFooter(list ? 'Save changes' : 'Save list')}</form>`);
 }
 
 function marketPricesForm(id) {
@@ -599,8 +624,13 @@ async function handleSubmit(event) {
     } else if (form.id === 'candidate-form') {
       event.preventDefault(); await saveForm(form, 'candidates', { name: data.get('name').trim(), phone: data.get('phone').trim(), role: data.get('role').trim(), salary_type: data.get('salary_type'), expected_salary: Number(data.get('expected_salary')), join_date: data.get('join_date') || null, status: form.dataset.id ? data.get('status') : 'pending', note: data.get('note').trim() }, form.dataset.id); toast('Save ho gaya.');
     } else if (form.id === 'market-form') {
-      event.preventDefault(); const names = data.getAll('name'), qs = data.getAll('quantity'), us = data.getAll('unit');
-      const { error } = await supabase.rpc('save_market_list', { p_date: data.get('date'), p_note: data.get('note') || '', p_items: names.map((n, i) => ({ name: n, quantity: Number(qs[i]), unit: us[i] })) }); if (error) throw error; toast('Market list save ho gayi.');
+      event.preventDefault(); const names = data.getAll('name'), qs = data.getAll('quantity'), us = data.getAll('unit'), ids = data.getAll('item_id');
+      const items = names.map((name, i) => ({ id: ids[i] || null, name: String(name).trim(), quantity: Number(qs[i]), unit: String(us[i]).trim() }));
+      if (form.dataset.id) {
+        const { error } = await supabase.rpc('update_market_list', { p_list_id: form.dataset.id, p_date: data.get('date'), p_note: data.get('note') || '', p_items: items }); if (error) throw error; toast('Market list update ho gayi.');
+      } else {
+        const { error } = await supabase.rpc('save_market_list', { p_date: data.get('date'), p_note: data.get('note') || '', p_items: items.map(({ name, quantity, unit }) => ({ name, quantity, unit })) }); if (error) throw error; toast('Market list save ho gayi.');
+      }
     } else if (form.id === 'market-prices-form') {
       event.preventDefault(); const id = form.dataset.id, amounts = state.marketItems.filter(i => i.list_id === id).map(i => ({ id: i.id, amount: Number(data.get(`amount_${i.id}`) || 0) }));
       const { error } = await supabase.rpc('complete_market_list', { p_list_id: id, p_amounts: amounts }); if (error) throw error; toast('Prices save ho gayin.');
@@ -676,6 +706,11 @@ document.addEventListener('click', async event => {
       case 'print-staff-slip': printStaffSlip(id); break;
       case 'employee-detail': employeeDetail(id); break;
       case 'add-market': marketForm(); break;
+      case 'edit-market': {
+        const list = state.marketLists.find(entry => entry.id === id);
+        if (!list) throw new Error('Market list nahi mili. Page refresh karke dobara try karein.');
+        marketForm(list); break;
+      }
       case 'add-market-row': $('#market-rows').insertAdjacentHTML('beforeend', marketRow()); break;
       case 'remove-market-row': if ($$('.market-row').length > 1) button.closest('.market-row').remove(); break;
       case 'print-market': printMarket(id); break;
@@ -723,6 +758,7 @@ document.addEventListener('click', async event => {
       case 'remove-demand-row': if ($$('.demand-row').length > 1) button.closest('.demand-row').remove(); break;
       case 'print-demand': printDemands([id]); break;
       case 'print-all-demand': printDemands(state.demands.filter(d => d.status === 'open').map(d => d.id)); break;
+      case 'print-inventory': printInventory(button.dataset.status); break;
       case 'done-all-demand': {
         const open = state.demands.filter(d => d.status === 'open'); if (!open.length) break;
         if (!window.confirm(`${open.length} pending demand Done karein? Inventory se stock kam ho jayega.`)) break;

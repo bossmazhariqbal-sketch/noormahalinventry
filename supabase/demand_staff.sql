@@ -193,6 +193,59 @@ begin
   return v_id;
 end; $$;
 
+create or replace function public.update_market_list(p_list_id uuid, p_date date, p_note text, p_items jsonb)
+returns void language plpgsql security invoker set search_path = '' as $$
+declare
+  v_owner uuid := auth.uid();
+  v_line jsonb;
+  v_item_id uuid;
+  v_seen_ids uuid[] := '{}';
+  v_name text;
+  v_quantity numeric(12,3);
+  v_unit text;
+begin
+  if v_owner is null then raise exception 'Sign in is required'; end if;
+  if p_items is null or jsonb_typeof(p_items) <> 'array' or jsonb_array_length(p_items) = 0 then raise exception 'Kam az kam ek item add karein'; end if;
+  perform 1 from public.market_lists where id = p_list_id and owner_id = v_owner for update;
+  if not found then raise exception 'List not found'; end if;
+
+  update public.market_lists set date = coalesce(p_date, current_date), note = coalesce(p_note, '') where id = p_list_id and owner_id = v_owner;
+  for v_line in select value from jsonb_array_elements(p_items) loop
+    v_name := trim(coalesce(v_line ->> 'name', ''));
+    v_quantity := (v_line ->> 'quantity')::numeric;
+    v_unit := trim(coalesce(v_line ->> 'unit', ''));
+    if length(v_name) not between 1 and 100 then raise exception 'Item name 1 se 100 characters ka hona chahiye'; end if;
+    if v_quantity is null or v_quantity <= 0 then raise exception 'Quantity zero se zyada honi chahiye'; end if;
+
+    v_item_id := nullif(v_line ->> 'id', '')::uuid;
+    if v_item_id is not null and v_item_id = any(v_seen_ids) then raise exception 'Market list item duplicate hai'; end if;
+    if v_item_id is null then
+      insert into public.market_items (owner_id, list_id, name, quantity, unit)
+      values (v_owner, p_list_id, v_name, v_quantity, v_unit)
+      returning id into v_item_id;
+    else
+      update public.market_items
+      set name = v_name,
+          quantity = v_quantity,
+          unit = v_unit,
+          amount = case when name is distinct from v_name or quantity is distinct from v_quantity or unit is distinct from v_unit then 0 else amount end
+      where id = v_item_id and list_id = p_list_id and owner_id = v_owner;
+      if not found then raise exception 'Market list item not found'; end if;
+    end if;
+    v_seen_ids := array_append(v_seen_ids, v_item_id);
+  end loop;
+
+  delete from public.market_items
+  where list_id = p_list_id and owner_id = v_owner and not (id = any(v_seen_ids));
+
+  update public.market_lists
+  set total_spent = case when status = 'bought'
+    then (select coalesce(sum(amount), 0) from public.market_items where list_id = p_list_id and owner_id = v_owner)
+    else total_spent
+  end
+  where id = p_list_id and owner_id = v_owner;
+end; $$;
+
 create or replace function public.complete_market_list(p_list_id uuid, p_amounts jsonb)
 returns void language plpgsql security invoker set search_path = '' as $$
 declare v_owner uuid := auth.uid(); v_line jsonb;
@@ -209,5 +262,7 @@ end; $$;
 
 revoke all on function public.save_market_list(date, text, jsonb) from public;
 grant execute on function public.save_market_list(date, text, jsonb) to authenticated;
+revoke all on function public.update_market_list(uuid, date, text, jsonb) from public;
+grant execute on function public.update_market_list(uuid, date, text, jsonb) to authenticated;
 revoke all on function public.complete_market_list(uuid, jsonb) from public;
 grant execute on function public.complete_market_list(uuid, jsonb) to authenticated;
