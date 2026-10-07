@@ -164,7 +164,7 @@ SQL files: `supabase/schema.sql` (inventory), `supabase/demand_staff.sql` (deman
 4. Check (alag run karein): `select employee_id, date, count(*) from public.attendance group by 1, 2 having count(*) > 1;` ka natija khali hona chahiye.
 5. App ko refresh karein (Ctrl+F5).
 
-Existing project par Market Purchase ki saved lists edit karne ke liye Supabase SQL Editor mein `supabase/demand_staff.sql` dobara run karein, phir app ko refresh karein. Script ki tables, indexes aur functions repeat-run ke liye safe hain.
+Existing project par agar Market Purchase list edit karte waqt `Could not find the function public.update_market_list(...) in the schema cache` aaye, Supabase > SQL Editor mein `supabase/demand_staff.sql` ka poora text dobara run karein. Is se update function usi parameter signature ke saath recreate hota hai aur PostgREST schema cache reload hota hai. Run successful hone ke baad app ko Ctrl+F5 se refresh karein. Is script ko dobara chalana safe hai.
 
 Agar app mein "relation salary_payments does not exist" ya "no unique constraint matching ON CONFLICT" jaisa error aaye to is ka matlab hai ye SQL abhi run nahi hui.
 

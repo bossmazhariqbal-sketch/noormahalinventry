@@ -193,7 +193,8 @@ begin
   return v_id;
 end; $$;
 
-create or replace function public.update_market_list(p_list_id uuid, p_date date, p_note text, p_items jsonb)
+drop function if exists public.update_market_list(uuid, date, text, jsonb);
+create function public.update_market_list(p_list_id uuid, p_date date, p_note text, p_items jsonb)
 returns void language plpgsql security invoker set search_path = '' as $$
 declare
   v_owner uuid := auth.uid();
@@ -266,3 +267,5 @@ revoke all on function public.update_market_list(uuid, date, text, jsonb) from p
 grant execute on function public.update_market_list(uuid, date, text, jsonb) to authenticated;
 revoke all on function public.complete_market_list(uuid, jsonb) from public;
 grant execute on function public.complete_market_list(uuid, jsonb) to authenticated;
+
+notify pgrst, 'reload schema';

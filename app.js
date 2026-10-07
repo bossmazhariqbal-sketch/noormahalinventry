@@ -368,9 +368,11 @@ function printSlip({ title, code, dateText, note, head, rows, totals, className 
 function renderMarket() {
   const lines = new Map(), marketSpent = sumBy(state.marketLists.filter(l => l.status === 'bought'), l => l.total_spent), marketOpen = state.marketLists.filter(l => l.status !== 'bought').length;
   state.marketItems.forEach(i => { const a = lines.get(i.list_id) || []; a.push(i); lines.set(i.list_id, a); });
-  const rows = state.marketLists.length ? state.marketLists.map(l => { const ls = lines.get(l.id) || [], done = l.status === 'bought';
+  const rows = state.marketLists.length ? state.marketLists.map(l => {
+    const ls = lines.get(l.id) || [], done = l.status === 'bought';
     const itemsText = ls.map(i => `${i.name} × ${number(i.quantity)} ${i.unit}`).join(', ') || '—';
-    return `<tr><td><strong>${fmtDate(l.date)}</strong>${l.note ? `<span class="cell-sub">${esc(l.note)}</span>` : ''}</td><td title="${esc(itemsText)}">${esc(truncateText(itemsText))}</td><td>${done ? `<strong>${money(l.total_spent)}</strong>` : '—'}</td><td><span class="badge ${done ? 'badge-good' : 'badge-low'}">${done ? 'Bought' : 'To buy'}</span></td><td><div class="table-actions"><button class="action-button" data-action="print-market" data-id="${l.id}">Print</button><button class="action-button" data-action="edit-market" data-id="${l.id}">Edit list</button><button class="action-button" data-action="market-prices" data-id="${l.id}">${done ? 'Edit prices' : 'Prices'}</button><button class="action-button danger" data-action="delete-market" data-id="${l.id}">Delete</button></div></td></tr>`; }).join('') : '<tr><td colspan="5"><div class="empty-state"><strong>Abhi koi market list nahi</strong>Taza saman (sabzi, dhaniya) ki roz ki list yahan banayein.</div></td></tr>';
+    return `<tr><td><strong>${fmtDate(l.date)}</strong>${l.note ? `<span class="cell-sub">${esc(l.note)}</span>` : ''}</td><td title="${esc(itemsText)}">${esc(truncateText(itemsText))}</td><td>${done ? `<strong>${money(l.total_spent)}</strong>` : '—'}</td><td><span class="badge ${done ? 'badge-good' : 'badge-low'}">${done ? 'Bought' : 'To buy'}</span></td><td><div class="table-actions"><button class="action-button" data-action="print-market" data-id="${l.id}">Print</button><button class="action-button" data-action="edit-market" data-id="${l.id}">Edit list</button><button class="action-button" data-action="market-prices" data-id="${l.id}">${done ? 'Edit prices' : 'Prices'}</button><button class="action-button danger" data-action="delete-market" data-id="${l.id}">Delete</button></div></td></tr>`;
+  }).join('') : '<tr><td colspan="5"><div class="empty-state"><strong>Abhi koi market list nahi</strong>Taza saman (sabzi, dhaniya) ki roz ki list yahan banayein.</div></td></tr>';
   return `${heading('Market Purchase', 'Roz market se kharidne wala taza saman. Ye stock mein nahi jata, sirf kharcha banta hai.', '<button class="button button-primary" data-action="add-market">+ New list</button>')}${totalChips([['Total kharcha (Bought lists)', money(marketSpent)], ['Kharidna baqi (lists)', marketOpen]])}<section class="panel"><div class="table-scroll"><table><thead><tr><th>DATE</th><th>ITEMS</th><th>SPENT</th><th>STATUS</th><th></th></tr></thead><tbody>${rows}</tbody></table></div><div class="table-footer">${state.marketLists.length} lists · Spent <strong>${money(marketSpent)}</strong></div></section>`;
 }
 
@@ -401,7 +403,7 @@ const expenseCategoryStorageKey = () => `stockroom.expenseCategories.${state.use
 
 function expenseCategories() {
   let custom = [];
-  try { custom = JSON.parse(localStorage.getItem(expenseCategoryStorageKey()) || '[]'); } catch {}
+  try { custom = JSON.parse(localStorage.getItem(expenseCategoryStorageKey()) || '[]'); } catch { }
   return [...new Map([...EXPENSE_CATEGORIES, ...(Array.isArray(custom) ? custom : [])].filter(c => typeof c === 'string' && c.trim()).map(c => [c.toLocaleLowerCase(), c])).values()];
 }
 
@@ -802,7 +804,7 @@ document.addEventListener('change', event => {
   if (event.target.matches('.att-paid')) refreshAttendanceTotals();
   if (event.target.id === 'att-date' && event.target.value) { state.attDraft = null; state.attDate = event.target.value; loadData().then(render).catch(e => toast(e.message, true)); }
   if (event.target.id === 'staff-month' && event.target.value) { state.attDraft = null; state.staffMonth = event.target.value; state.attDate = event.target.value === today().slice(0, 7) ? today() : `${event.target.value}-01`; loadData().then(render).catch(e => toast(e.message, true)); }
-  if (event.target.id === 'thermal-width') { try { localStorage.setItem('thermalWidth', event.target.value); } catch {} }
+  if (event.target.id === 'thermal-width') { try { localStorage.setItem('thermalWidth', event.target.value); } catch { } }
   if (event.target.id === 'inventory-category-filter' || event.target.id === 'inventory-status-filter') refreshInventoryRows();
   if (event.target.id === 'purchase-date-filter') { state.purchaseFilter.date = event.target.value; render(); }
   if (event.target.id === 'purchase-supplier-filter') { state.purchaseFilter.supplier = event.target.value; render(); }
