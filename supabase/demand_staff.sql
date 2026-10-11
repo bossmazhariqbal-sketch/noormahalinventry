@@ -62,10 +62,45 @@ begin
   update public.daily_demands set status = 'done', done_at = now() where id = p_demand_id and owner_id = v_owner;
 end; $$;
 
+create or replace function public.update_demand(p_demand_id uuid, p_date date, p_note text, p_items jsonb)
+returns void language plpgsql security invoker set search_path = '' as $$
+declare
+  v_owner uuid := auth.uid();
+  v_status text;
+  v_line jsonb;
+  v_item_id uuid;
+  v_quantity numeric(12,3);
+begin
+  if v_owner is null then raise exception 'Sign in is required'; end if;
+  if p_items is null or jsonb_typeof(p_items) <> 'array' or jsonb_array_length(p_items) = 0 then raise exception 'Kam az kam ek item add karein'; end if;
+
+  select status into v_status from public.daily_demands where id = p_demand_id and owner_id = v_owner for update;
+  if not found then raise exception 'Demand not found'; end if;
+  if v_status <> 'open' then raise exception 'Done wali demand badli nahi ja sakti'; end if;
+
+  update public.daily_demands
+  set date = coalesce(p_date, current_date), note = coalesce(p_note, '')
+  where id = p_demand_id and owner_id = v_owner;
+  delete from public.demand_items where demand_id = p_demand_id and owner_id = v_owner;
+
+  for v_line in select value from jsonb_array_elements(p_items) loop
+    v_item_id := nullif(v_line ->> 'item_id', '')::uuid;
+    v_quantity := (v_line ->> 'quantity')::numeric;
+    if v_item_id is null then raise exception 'Inventory item not found'; end if;
+    if v_quantity is null or v_quantity <= 0 then raise exception 'Quantity zero se zyada honi chahiye'; end if;
+    perform 1 from public.inventory_items where id = v_item_id and owner_id = v_owner;
+    if not found then raise exception 'Inventory item not found'; end if;
+    insert into public.demand_items (owner_id, demand_id, item_id, quantity)
+    values (v_owner, p_demand_id, v_item_id, v_quantity);
+  end loop;
+end; $$;
+
 revoke all on function public.save_demand(date, text, jsonb) from public;
 grant execute on function public.save_demand(date, text, jsonb) to authenticated;
 revoke all on function public.complete_demand(uuid) from public;
 grant execute on function public.complete_demand(uuid) to authenticated;
+revoke all on function public.update_demand(uuid, date, text, jsonb) from public;
+grant execute on function public.update_demand(uuid, date, text, jsonb) to authenticated;
 
 -- Staff: employees and attendance
 create table if not exists public.employees (

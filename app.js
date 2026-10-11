@@ -204,19 +204,23 @@ function renderDemand() {
   const rows = state.demands.length ? state.demands.map(d => {
     const ls = lines.get(d.id) || [], open = d.status === 'open', value = demandValue(ls);
     const text = ls.map(l => `${items.get(l.item_id)?.name || 'Item'} × ${number(l.quantity)}`).join(', ');
-    return `<tr><td><strong>${esc(d.date)}</strong>${d.note ? `<span class="cell-sub">${esc(d.note)}</span>` : ''}</td><td>${esc(text || '—')}</td><td>${ls.length}</td><td><strong>${money(value)}</strong></td><td><span class="badge ${open ? 'badge-low' : 'badge-good'}">${open ? 'Pending' : 'Done'}</span></td><td><div class="table-actions"><button class="action-button" data-action="print-demand" data-id="${d.id}">Print</button>${open ? `<button class="action-button" data-action="done-demand" data-id="${d.id}">Done</button><button class="action-button danger" data-action="delete-demand" data-id="${d.id}">Delete</button>` : ''}</div></td></tr>`;
+    const characters = Array.from(text);
+    const visibleText = characters.length > 40 ? `${characters.slice(0, 37).join('')}...` : text;
+    return `<tr><td><strong>${esc(d.date)}</strong>${d.note ? `<span class="cell-sub">${esc(d.note)}</span>` : ''}</td><td title="${esc(text || '—')}">${esc(visibleText || '—')}</td><td>${ls.length}</td><td><strong>${money(value)}</strong></td><td><span class="badge ${open ? 'badge-low' : 'badge-good'}">${open ? 'Pending' : 'Done'}</span></td><td><div class="table-actions"><button class="action-button" data-action="print-demand" data-id="${d.id}">Print</button>${open ? `<button class="action-button" data-action="edit-demand" data-id="${d.id}">Edit</button><button class="action-button" data-action="done-demand" data-id="${d.id}">Done</button><button class="action-button danger" data-action="delete-demand" data-id="${d.id}">Delete</button>` : ''}</div></td></tr>`;
   }).join('') : '<tr><td colspan="6"><div class="empty-state"><strong>Abhi koi demand nahi</strong>Roz ki demand yahan banayein aur print karein.</div></td></tr>';
   return `${heading('Daily Demand', 'Roz ki demand banayein, thermal printer par print karein, phir Done karein.', `${pending ? `<button class="button" data-action="print-all-demand">Print all (${pending})</button><button class="button" data-action="done-all-demand">Done all</button>` : ''}${thermalWidthSelect()}<button class="button button-primary" data-action="add-demand">+ New demand</button>`)}${totalChips([['Pending demand', pending], ['Pending ki value', money(pendingValue)], ['Done (stock se nikla)', money(doneValue)]])}<section class="panel"><div class="table-scroll"><table><thead><tr><th>DATE</th><th>ITEMS</th><th>LINES</th><th>VALUE</th><th>STATUS</th><th></th></tr></thead><tbody>${rows}</tbody></table></div><div class="table-footer">${state.demands.length} demand${state.demands.length === 1 ? '' : 's'} · Pending <strong>${money(pendingValue)}</strong> · Done <strong>${money(doneValue)}</strong></div></section>`;
 }
 
-function demandRow() {
-  const options = state.items.map(i => `<option value="${i.id}" data-unit="${esc(i.unit)}">${esc(i.name)} (stock ${number(i.current_stock)} ${esc(i.unit)})</option>`).join('');
-  return `<div class="demand-row"><select name="item_id" required>${options}</select><div class="qty-wrap"><input name="quantity" type="number" min="0.001" step="0.001" required placeholder="Qty"><span class="qty-unit">${esc(state.items[0]?.unit || '')}</span></div><button class="action-button danger" type="button" data-action="remove-demand-row" aria-label="Remove row">×</button></div>`;
+function demandRow(line = null) {
+  const options = state.items.map(i => `<option value="${i.id}" data-unit="${esc(i.unit)}" ${line?.item_id === i.id ? 'selected' : ''}>${esc(i.name)} (stock ${number(i.current_stock)} ${esc(i.unit)})</option>`).join('');
+  const unit = state.items.find(item => item.id === line?.item_id)?.unit || state.items[0]?.unit || '';
+  return `<div class="demand-row"><select name="item_id" required>${options}</select><div class="qty-wrap"><input name="quantity" type="number" min="0.001" step="0.001" required placeholder="Qty" value="${line ? esc(line.quantity) : ''}"><span class="qty-unit">${esc(unit)}</span></div><button class="action-button danger" type="button" data-action="remove-demand-row" aria-label="Remove row">×</button></div>`;
 }
 
-function demandForm() {
+function demandForm(demand = null) {
   if (!state.items.length) return toast('Pehle inventory item add karein.', true);
-  openModal('New daily demand', 'Jo saman aaj chahiye uski list', `<form id="demand-form"><div class="form-grid"><label>Date<input name="date" type="date" value="${today()}" required></label><label>Note<input name="note" maxlength="120" placeholder="Optional"></label></div><div id="demand-rows" class="demand-rows">${demandRow()}</div><button class="button button-small" type="button" data-action="add-demand-row">+ Add item</button>${modalFooter('Save demand')}</form>`);
+  const lines = demand ? state.demandItems.filter(line => line.demand_id === demand.id) : [];
+  openModal(demand ? 'Edit daily demand' : 'New daily demand', 'Jo saman aaj chahiye uski list', `<form id="demand-form" data-id="${demand?.id || ''}"><div class="form-grid"><label>Date<input name="date" type="date" value="${esc(demand?.date || today())}" required></label><label>Note<input name="note" maxlength="120" placeholder="Optional" value="${esc(demand?.note || '')}"></label></div><div id="demand-rows" class="demand-rows">${(lines.length ? lines : [null]).map(line => demandRow(line)).join('')}</div><button class="button button-small" type="button" data-action="add-demand-row">+ Add item</button>${modalFooter(demand ? 'Save changes' : 'Save demand')}</form>`);
 }
 
 function printDemands(ids) {
@@ -652,7 +656,7 @@ async function handleSubmit(event) {
       event.preventDefault(); const { error } = await supabase.rpc('pay_supplier', { p_supplier_id: form.dataset.id, p_amount: Number(data.get('amount')), p_date: data.get('date'), p_note: data.get('note') || '' }); if (error) throw error; toast('Payment save ho gayi.');
     } else if (form.id === 'demand-form') {
       event.preventDefault(); const ids = data.getAll('item_id'), qs = data.getAll('quantity');
-      const { error } = await supabase.rpc('save_demand', { p_date: data.get('date'), p_note: data.get('note') || '', p_items: ids.map((id, i) => ({ item_id: id, quantity: Number(qs[i]) })) }); if (error) throw error; toast('Demand save ho gayi.');
+      const editing = Boolean(form.dataset.id), { error } = await supabase.rpc(editing ? 'update_demand' : 'save_demand', { ...(editing ? { p_demand_id: form.dataset.id } : {}), p_date: data.get('date'), p_note: data.get('note') || '', p_items: ids.map((id, i) => ({ item_id: id, quantity: Number(qs[i]) })) }); if (error) throw error; toast(editing ? 'Demand update ho gayi.' : 'Demand save ho gayi.');
     } else if (form.id === 'adjustment-form') {
       event.preventDefault(); const { error } = await supabase.rpc('adjust_stock', { p_item_id: data.get('item_id'), p_quantity: Number(data.get('quantity')), p_type: data.get('type'), p_reason: data.get('reason') }); if (error) throw error; toast('Stock adjustment saved.');
     } else return;
@@ -756,6 +760,11 @@ document.addEventListener('click', async event => {
         state.attDraft = null; toast('Attendance save ho gayi.'); await loadData(); render(); break;
       }
       case 'add-demand': demandForm(); break;
+      case 'edit-demand': {
+        const demand = state.demands.find(entry => entry.id === id);
+        if (!demand || demand.status !== 'open') throw new Error('Sirf Pending demand edit ho sakti hai.');
+        demandForm(demand); break;
+      }
       case 'add-demand-row': $('#demand-rows').insertAdjacentHTML('beforeend', demandRow()); break;
       case 'remove-demand-row': if ($$('.demand-row').length > 1) button.closest('.demand-row').remove(); break;
       case 'print-demand': printDemands([id]); break;

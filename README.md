@@ -64,7 +64,8 @@ Inventory wala hissa aur Staff wala hissa **alag alag** hain. Dono ki tables aur
 1. **+ New demand**: date, items aur quantity chunein (zyada items ke liye + Add item).
 2. **Print**: us demand ki apni slip. **Print all**: saari Pending demands ki ek slip (same item ki quantity jama ho jati hai).
 3. **Done** ya **Done all**: stock inventory se kam ho jata hai aur Stock Adjustment mein record banta hai. Stock kam ho to Done nahi hota aur message aata hai.
-4. Done wali demand badli nahi ja sakti. Pending demand delete ho sakti hai.
+4. **Edit** ya **Delete** sirf Pending demand ke liye hai. Done wali demand badli nahi ja sakti; **Print** dono status ki demand par kaam karta hai.
+5. Demand list mein items 40 characters tak dikhte hain; poori list dekhne ke liye item list par hover karein.
 
 ### Teen alag cheezein (ghalti na karein)
 
@@ -164,7 +165,7 @@ SQL files: `supabase/schema.sql` (inventory), `supabase/demand_staff.sql` (deman
 4. Check (alag run karein): `select employee_id, date, count(*) from public.attendance group by 1, 2 having count(*) > 1;` ka natija khali hona chahiye.
 5. App ko refresh karein (Ctrl+F5).
 
-Existing project par agar Market Purchase list edit karte waqt `Could not find the function public.update_market_list(...) in the schema cache` aaye, Supabase > SQL Editor mein `supabase/demand_staff.sql` ka poora text dobara run karein. Is se update function usi parameter signature ke saath recreate hota hai aur PostgREST schema cache reload hota hai. Run successful hone ke baad app ko Ctrl+F5 se refresh karein. Is script ko dobara chalana safe hai.
+Existing project par Daily Demand editing enable karne ke liye Supabase > SQL Editor mein `supabase/demand_staff.sql` ka poora text ek baar dobara run karein; is se `update_demand` function install aur PostgREST schema cache reload hota hai. Ye script dobara chalane par bhi safe hai. Run successful hone ke baad app ko Ctrl+F5 se refresh karein. Agar Daily Demand edit karte waqt `Could not find the function public.update_demand(...) in the schema cache` ya Market Purchase edit karte waqt `Could not find the function public.update_market_list(...) in the schema cache` aaye to bhi yehi karein.
 
 Agar app mein "relation salary_payments does not exist" ya "no unique constraint matching ON CONFLICT" jaisa error aaye to is ka matlab hai ye SQL abhi run nahi hui.
 
