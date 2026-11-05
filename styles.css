@@ -137,3 +137,10 @@
 .due{color:#c0392b}.pay-head{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;padding:14px 16px;border-bottom:1px solid #edf0eb}.pay-total{font-size:15px}.supplier-block{margin-bottom:16px}
 
 .modal-body h3{margin:18px 0 8px;font-size:14px}.modal-body .table-scroll{max-height:260px;overflow:auto}.modal-body .settings-row{padding:9px 0}
+
+button.is-loading{cursor:wait;opacity:.82}
+button.is-loading::before{content:"";display:inline-block;width:12px;height:12px;margin-right:8px;border:2px solid currentColor;border-right-color:transparent;border-radius:50%;vertical-align:-2px;animation:button-loading .7s linear infinite}
+button:disabled{cursor:not-allowed}
+button:disabled.is-loading{cursor:wait}
+@keyframes button-loading{to{transform:rotate(360deg)}}
+@media(prefers-reduced-motion:reduce){button.is-loading::before{animation-duration:1.5s}}

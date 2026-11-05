@@ -47,6 +47,23 @@ function toast(message, error = false) {
   window.setTimeout(() => node.remove(), 3800);
 }
 
+function setButtonBusy(button, busy) {
+  if (!button) return;
+  if (busy) {
+    button.dataset.wasDisabled = String(button.disabled);
+    button.dataset.busy = 'true';
+    button.disabled = true;
+    button.setAttribute('aria-busy', 'true');
+    button.classList.add('is-loading');
+    return;
+  }
+  button.disabled = button.dataset.wasDisabled === 'true';
+  delete button.dataset.wasDisabled;
+  delete button.dataset.busy;
+  button.removeAttribute('aria-busy');
+  button.classList.remove('is-loading');
+}
+
 function statusFor(item) {
   if (Number(item.current_stock) <= 0) return ['Out of Stock', 'out'];
   if (Number(item.current_stock) <= Number(item.minimum_stock)) return ['Low Stock', 'low'];
@@ -701,10 +718,15 @@ async function saveForm(form, table, values, id) {
 async function handleSubmit(event) {
   const form = event.target;
   if (!(form instanceof HTMLFormElement)) return;
+  if (form.dataset.submitting === 'true') { event.preventDefault(); return; }
+  event.preventDefault();
+  form.dataset.submitting = 'true';
+  const submitButton = form.querySelector('button[type="submit"]');
+  setButtonBusy(submitButton, true);
   const data = new FormData(form);
   try {
     if (form.id === 'login-form') {
-      event.preventDefault(); const email = data.get('email'), password = data.get('password');
+      const email = data.get('email'), password = data.get('password');
       const result = form.dataset.signup === 'true' ? await supabase.auth.signUp({ email, password }) : await supabase.auth.signInWithPassword({ email, password });
       if (result.error) throw result.error;
       if (form.dataset.signup === 'true' && !result.data.session) { $('#auth-message').textContent = 'Check your email to confirm your account, then sign in.'; return; }
@@ -712,25 +734,25 @@ async function handleSubmit(event) {
       return;
     }
     if (form.id === 'item-form') {
-      event.preventDefault(); const editing = Boolean(form.dataset.id); const values = { name: data.get('name').trim(), category_id: data.get('category_id') || null, unit: data.get('unit').trim(), current_stock: Number(data.get('current_stock')), minimum_stock: Number(data.get('minimum_stock')), cost_per_unit: Number(data.get('cost_per_unit')) };
+      const editing = Boolean(form.dataset.id); const values = { name: data.get('name').trim(), category_id: data.get('category_id') || null, unit: data.get('unit').trim(), current_stock: Number(data.get('current_stock')), minimum_stock: Number(data.get('minimum_stock')), cost_per_unit: Number(data.get('cost_per_unit')) };
       if (editing) delete values.current_stock;
       await saveForm(form, 'inventory_items', values, form.dataset.id); toast(form.dataset.id ? 'Item updated.' : 'Item added.');
     } else if (form.id === 'supplier-form') {
-      event.preventDefault(); const values = { name: data.get('name').trim(), phone: data.get('phone').trim(), address: data.get('address').trim() }; await saveForm(form, 'suppliers', values, form.dataset.id); toast(form.dataset.id ? 'Supplier updated.' : 'Supplier added.');
+      const values = { name: data.get('name').trim(), phone: data.get('phone').trim(), address: data.get('address').trim() }; await saveForm(form, 'suppliers', values, form.dataset.id); toast(form.dataset.id ? 'Supplier updated.' : 'Supplier added.');
     } else if (form.id === 'category-form') {
-      event.preventDefault(); await saveForm(form, 'categories', { name: data.get('name').trim() }, form.dataset.id); toast(form.dataset.id ? 'Category updated.' : 'Category added.');
+      await saveForm(form, 'categories', { name: data.get('name').trim() }, form.dataset.id); toast(form.dataset.id ? 'Category updated.' : 'Category added.');
     } else if (form.id === 'purchase-form') {
-      event.preventDefault(); const { data: purchaseId, error } = await supabase.rpc('record_purchase', { p_date: data.get('date'), p_supplier_id: data.get('supplier_id') || null, p_items: [{ item_id: data.get('item_id'), quantity: Number(data.get('quantity')), cost_per_unit: Number(data.get('cost_per_unit')) }], p_paid: { paid: null, pending: 0, partial: Number(data.get('paid_amount') || 0) }[data.get('payment')] }); if (error) throw error; toast('Purchase saved and stock updated.');
+      const { data: purchaseId, error } = await supabase.rpc('record_purchase', { p_date: data.get('date'), p_supplier_id: data.get('supplier_id') || null, p_items: [{ item_id: data.get('item_id'), quantity: Number(data.get('quantity')), cost_per_unit: Number(data.get('cost_per_unit')) }], p_paid: { paid: null, pending: 0, partial: Number(data.get('paid_amount') || 0) }[data.get('payment')] }); if (error) throw error; toast('Purchase saved and stock updated.');
     } else if (form.id === 'employee-form') {
-      event.preventDefault(); await saveForm(form, 'employees', { name: data.get('name').trim(), phone: data.get('phone').trim(), role: data.get('role').trim(), salary_type: data.get('salary_type'), salary: Number(data.get('salary')), active: form.dataset.id ? data.has('active') : true, join_date: data.get('join_date') || null }, form.dataset.id); toast('Employee save ho gaya.');
+      await saveForm(form, 'employees', { name: data.get('name').trim(), phone: data.get('phone').trim(), role: data.get('role').trim(), salary_type: data.get('salary_type'), salary: Number(data.get('salary')), active: form.dataset.id ? data.has('active') : true, join_date: data.get('join_date') || null }, form.dataset.id); toast('Employee save ho gaya.');
     } else if (form.id === 'advance-form') {
-      event.preventDefault(); const amount = round2(data.get('amount')); if (!(amount > 0)) throw new Error('Amount zero se zyada honi chahiye'); await saveForm(form, 'advances', { employee_id: data.get('employee_id'), date: data.get('date'), amount, note: data.get('note').trim() }); toast('Advance save ho gaya.');
+      const amount = round2(data.get('amount')); if (!(amount > 0)) throw new Error('Amount zero se zyada honi chahiye'); await saveForm(form, 'advances', { employee_id: data.get('employee_id'), date: data.get('date'), amount, note: data.get('note').trim() }); toast('Advance save ho gaya.');
     } else if (form.id === 'salary-payment-form') {
-      event.preventDefault(); const amount = round2(data.get('amount')); if (!(amount > 0)) throw new Error('Amount zero se zyada honi chahiye'); await saveForm(form, 'salary_payments', { employee_id: data.get('employee_id'), date: data.get('date'), salary_month: `${data.get('salary_month')}-01`, amount, note: data.get('note').trim() }); toast('Salary payment save ho gayi.');
+      const amount = round2(data.get('amount')); if (!(amount > 0)) throw new Error('Amount zero se zyada honi chahiye'); await saveForm(form, 'salary_payments', { employee_id: data.get('employee_id'), date: data.get('date'), salary_month: `${data.get('salary_month')}-01`, amount, note: data.get('note').trim() }); toast('Salary payment save ho gayi.');
     } else if (form.id === 'candidate-form') {
-      event.preventDefault(); await saveForm(form, 'candidates', { name: data.get('name').trim(), phone: data.get('phone').trim(), role: data.get('role').trim(), salary_type: data.get('salary_type'), expected_salary: Number(data.get('expected_salary')), join_date: data.get('join_date') || null, status: form.dataset.id ? data.get('status') : 'pending', note: data.get('note').trim() }, form.dataset.id); toast('Save ho gaya.');
+      await saveForm(form, 'candidates', { name: data.get('name').trim(), phone: data.get('phone').trim(), role: data.get('role').trim(), salary_type: data.get('salary_type'), expected_salary: Number(data.get('expected_salary')), join_date: data.get('join_date') || null, status: form.dataset.id ? data.get('status') : 'pending', note: data.get('note').trim() }, form.dataset.id); toast('Save ho gaya.');
     } else if (form.id === 'market-form') {
-      event.preventDefault(); const names = data.getAll('name'), qs = data.getAll('quantity'), us = data.getAll('unit'), ids = data.getAll('item_id');
+      const names = data.getAll('name'), qs = data.getAll('quantity'), us = data.getAll('unit'), ids = data.getAll('item_id');
       const items = names.map((name, i) => ({ id: ids[i] || null, name: String(name).trim(), quantity: Number(qs[i]), unit: String(us[i]).trim() }));
       if (form.dataset.id) {
         const { error } = await supabase.rpc('update_market_list', { p_list_id: form.dataset.id, p_date: data.get('date'), p_note: data.get('note') || '', p_items: items }); if (error) throw error; toast('Market list update ho gayi.');
@@ -738,31 +760,34 @@ async function handleSubmit(event) {
         const { error } = await supabase.rpc('save_market_list', { p_date: data.get('date'), p_note: data.get('note') || '', p_items: items.map(({ name, quantity, unit }) => ({ name, quantity, unit })) }); if (error) throw error; toast('Market list save ho gayi.');
       }
     } else if (form.id === 'market-prices-form') {
-      event.preventDefault(); const id = form.dataset.id, amounts = state.marketItems.filter(i => i.list_id === id).map(i => ({ id: i.id, amount: Number(data.get(`amount_${i.id}`) || 0) }));
+      const id = form.dataset.id, amounts = state.marketItems.filter(i => i.list_id === id).map(i => ({ id: i.id, amount: Number(data.get(`amount_${i.id}`) || 0) }));
       const { error } = await supabase.rpc('complete_market_list', { p_list_id: id, p_amounts: amounts }); if (error) throw error; toast('Prices save ho gayin.');
     } else if (form.id === 'expense-form') {
-      event.preventDefault(); await saveForm(form, 'expenses', { date: data.get('date'), category: data.get('category'), amount: Number(data.get('amount')), note: data.get('note').trim() }, form.dataset.id); toast(form.dataset.id ? 'Expense update ho gaya.' : 'Expense save ho gaya.');
+      await saveForm(form, 'expenses', { date: data.get('date'), category: data.get('category'), amount: Number(data.get('amount')), note: data.get('note').trim() }, form.dataset.id); toast(form.dataset.id ? 'Expense update ho gaya.' : 'Expense save ho gaya.');
     } else if (form.id === 'expense-category-form') {
-      event.preventDefault(); const name = data.get('name').trim();
+      const name = data.get('name').trim();
       if (expenseCategories().some(c => c.toLocaleLowerCase() === name.toLocaleLowerCase())) return toast('Ye category pehle se mojood hai.', true);
       const custom = JSON.parse(localStorage.getItem(expenseCategoryStorageKey()) || '[]');
       localStorage.setItem(expenseCategoryStorageKey(), JSON.stringify([...(Array.isArray(custom) ? custom : []), name]));
       toast('Expense category add ho gayi.');
     } else if (form.id === 'jazzcash-payment-form') {
-      event.preventDefault(); await saveForm(form, 'jazzcash_payments', { date: data.get('date'), channel: data.get('channel'), amount: Number(data.get('amount')), transaction_ref: data.get('transaction_ref').trim(), note: data.get('note').trim() }); toast('Payment record ho gayi.');
+      await saveForm(form, 'jazzcash_payments', { date: data.get('date'), channel: data.get('channel'), amount: Number(data.get('amount')), transaction_ref: data.get('transaction_ref').trim(), note: data.get('note').trim() }); toast('Payment record ho gayi.');
     } else if (form.id === 'paybill-form') {
-      event.preventDefault(); const { error } = await supabase.rpc('pay_bill', { p_purchase_id: form.dataset.id, p_amount: Number(data.get('amount')), p_date: data.get('date'), p_note: data.get('note') || '' }); if (error) throw error; toast('Payment save ho gayi.');
+      const { error } = await supabase.rpc('pay_bill', { p_purchase_id: form.dataset.id, p_amount: Number(data.get('amount')), p_date: data.get('date'), p_note: data.get('note') || '' }); if (error) throw error; toast('Payment save ho gayi.');
     } else if (form.id === 'paysupplier-form') {
-      event.preventDefault(); const { error } = await supabase.rpc('pay_supplier', { p_supplier_id: form.dataset.id, p_amount: Number(data.get('amount')), p_date: data.get('date'), p_note: data.get('note') || '' }); if (error) throw error; toast('Payment save ho gayi.');
+      const { error } = await supabase.rpc('pay_supplier', { p_supplier_id: form.dataset.id, p_amount: Number(data.get('amount')), p_date: data.get('date'), p_note: data.get('note') || '' }); if (error) throw error; toast('Payment save ho gayi.');
     } else if (form.id === 'demand-form') {
-      event.preventDefault(); const ids = data.getAll('item_id'), qs = data.getAll('quantity');
+      const ids = data.getAll('item_id'), qs = data.getAll('quantity');
       const editing = Boolean(form.dataset.id), { error } = await supabase.rpc(editing ? 'update_demand' : 'save_demand', { ...(editing ? { p_demand_id: form.dataset.id } : {}), p_date: data.get('date'), p_note: data.get('note') || '', p_items: ids.map((id, i) => ({ item_id: id, quantity: Number(qs[i]) })) }); if (error) throw error; toast(editing ? 'Demand update ho gayi.' : 'Demand save ho gayi.');
     } else if (form.id === 'adjustment-form') {
-      event.preventDefault(); const { error } = await supabase.rpc('adjust_stock', { p_item_id: data.get('item_id'), p_quantity: Number(data.get('quantity')), p_type: data.get('type'), p_reason: data.get('reason') }); if (error) throw error; toast('Stock adjustment saved.');
+      const { error } = await supabase.rpc('adjust_stock', { p_item_id: data.get('item_id'), p_quantity: Number(data.get('quantity')), p_type: data.get('type'), p_reason: data.get('reason') }); if (error) throw error; toast('Stock adjustment saved.');
     } else return;
     $('#modal').close(); await loadData(); render();
   } catch (error) {
     toast(error.message || 'Something went wrong. Please try again.', true);
+  } finally {
+    form.dataset.submitting = 'false';
+    setButtonBusy(submitButton, false);
   }
 }
 
@@ -797,6 +822,8 @@ document.addEventListener('click', async event => {
   const nav = event.target.closest('[data-page]');
   if (nav) { state.page = nav.dataset.page; state.showSalary = false; state.attDraft = null; $('#sidebar').classList.remove('open'); $('#sidebar-scrim').classList.remove('visible'); render(); return; }
   const button = event.target.closest('[data-action]'); if (!button) return;
+  if (button.dataset.busy === 'true') return;
+  setButtonBusy(button, true);
   const id = button.dataset.id;
   try {
     switch (button.dataset.action) {
@@ -897,6 +924,7 @@ document.addEventListener('click', async event => {
       case 'sign-out': await supabase.auth.signOut(); state.user = null; showAuth(); break;
     }
   } catch (error) { toast(error.message, true); }
+  finally { setButtonBusy(button, false); }
 });
 
 document.addEventListener('input', event => {
