@@ -26,7 +26,7 @@ Inventory wala hissa aur Staff wala hissa **alag alag** hain. Dono ki tables aur
 
 | Page | Kaam |
 |---|---|
-| Dashboard | Total items, total stock, inventory value, is mahine ki purchase, low stock, do charts |
+| Dashboard | Total items, total stock, inventory value, is mahine ki purchase, daily/monthly/yearly total expense filter, Excel-compatible expense detail download, low stock, do charts |
 | Inventory | Items ki list, search, filter, Add / Edit / Delete, Adjust stock |
 | Purchases | Khareedari save karna. Save hote hi stock barhta hai aur item ki price latest purchase wali ho jati hai |
 | Daily Demand | Store ke stock se saman uthane ki demand: banana, print karna, Done karna |
@@ -49,6 +49,8 @@ Inventory wala hissa aur Staff wala hissa **alag alag** hain. Dono ki tables aur
 - Low Stock = Current stock <= Minimum stock
 - Out of Stock = Current stock 0
 - Item ko Edit karke stock nahi badalta. Stock badalne ke liye Purchase ya Adjust stock use karein, taake history bani rahe.
+- Dashboard ka **Total expense** chune hue din, mahine ya saal ke Expenses aur bought Market Purchase ko jama karta hai.
+- Dashboard ka **Download Excel report** button selected period ki har expense entry, bought market items aur date-wise total ko Excel-compatible CSV file mein download karta hai.
 
 ### Supplier ka udhaar (Pending Bills)
 - **Purchase save karte waqt** Payment chunein: **Paid** (poora ada), **Pending** (udhaar) ya **Partial** (kuch rakam di, baqi udhaar). Pending ya Partial ke liye supplier chunna zaroori hai.
