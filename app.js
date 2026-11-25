@@ -4,7 +4,7 @@ import { PRESENT, round2, monthRange, monthAttendance, calcStaffStats, staffTota
 const config = window.APP_CONFIG || {};
 const configured = config.supabaseUrl?.startsWith('https://') && config.supabaseAnonKey && !config.supabaseAnonKey.includes('YOUR_');
 const supabase = configured ? createClient(config.supabaseUrl, config.supabaseAnonKey) : null;
-const state = { user: null, page: 'dashboard', items: [], categories: [], suppliers: [], purchases: [], purchaseItems: [], adjustments: [], demands: [], demandItems: [], employees: [], attendance: [], candidates: [], advances: [], salaryPayments: [], marketLists: [], marketItems: [], billPayments: [], marketRange: [], expenses: [], jazzcashPayments: [], jazzcashToday: [], expenseRangeCount: 0, expenseTotalCount: 0, expFrom: '', expTo: '', expenseSearch: '', dashboardExpensePeriod: 'month', dashboardExpenseDate: '', dashboardExpenseMonth: '', dashboardExpenseYear: '', dashboardExpenses: 0, dashboardMarket: 0, cashFrom: '', cashTo: '', paymentRangeInitialized: false, showSalary: false, flow: { jazzcash: 0, supplierPaid: 0, market: 0, expenses: 0, dailySalary: 0 }, staffMonth: '', attDate: '', attDraft: null, search: '', purchaseFilter: { date: '', supplier: '' }, reportFilter: 'month', customFrom: '', customTo: '' };
+const state = { user: null, page: 'dashboard', items: [], categories: [], suppliers: [], purchases: [], purchaseItems: [], adjustments: [], demands: [], demandItems: [], employees: [], attendance: [], dailySalaryAttendance: [], candidates: [], advances: [], salaryPayments: [], marketLists: [], marketItems: [], marketMonth: '', billPayments: [], marketRange: [], expenses: [], jazzcashPayments: [], jazzcashToday: [], expenseRangeCount: 0, expenseTotalCount: 0, expFrom: '', expTo: '', expenseSearch: '', dashboardExpensePeriod: 'month', dashboardExpenseDate: '', dashboardExpenseMonth: '', dashboardExpenseYear: '', dashboardExpenses: 0, dashboardMarket: 0, cashFrom: '', cashTo: '', paymentRangeInitialized: false, showSalary: false, flow: { jazzcash: 0, supplierPaid: 0, market: 0, expenses: 0, dailySalary: 0 }, staffMonth: '', attDate: '', attDraft: null, search: '', purchaseFilter: { date: '', supplier: '' }, reportFilter: 'month', customFrom: '', customTo: '' };
 const $ = (selector, root = document) => root.querySelector(selector);
 const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
 const pageNames = { dashboard: 'Dashboard', inventory: 'Inventory', purchases: 'Purchases', demand: 'Daily Demand', suppliers: 'Suppliers', categories: 'Categories', reports: 'Reports', employees: 'Employees', attendance: 'Attendance', staffreport: 'Staff Report', candidates: 'Hiring', market: 'Market Purchase', payables: 'Pending Bills', expenses: 'Expenses', jazzcash: 'JazzCash Payments', advances: 'Advances', salarypayments: 'Salary Payments', settings: 'Settings' };
@@ -93,13 +93,15 @@ function showApp(user) {
 async function loadData() {
   if (!state.expFrom) state.expFrom = state.expTo = today();
   if (!state.attDate) { state.attDate = today(); state.staffMonth = today().slice(0, 7); }
+  if (!state.marketMonth) state.marketMonth = today().slice(0, 7);
   if (!state.paymentRangeInitialized) { state.cashFrom = state.cashTo = today(); state.paymentRangeInitialized = true; }
   const range = monthRange(state.staffMonth);
+  const marketMonthRange = monthRange(state.marketMonth);
   const dashboardRange = dashboardExpenseRange();
   let jazzcashQuery = supabase.from('jazzcash_payments').select('*').order('date', { ascending: false }).order('created_at', { ascending: false });
   if (state.cashFrom) jazzcashQuery = jazzcashQuery.gte('date', state.cashFrom);
   if (state.cashTo) jazzcashQuery = jazzcashQuery.lte('date', state.cashTo);
-  const [items, categories, suppliers, purchases, purchaseItems, adjustments, demands, demandItems, employees, attendance, attendanceDay, candidates, advances, salaryPayments, marketLists, marketRange, expenses, expenseTotalCount, jazzcashPayments, jazzcashToday, billPayments] = await Promise.all([
+  const [items, categories, suppliers, purchases, purchaseItems, adjustments, demands, demandItems, employees, attendance, attendanceDay, dailySalaryAttendance, candidates, advances, salaryPayments, marketLists, marketRange, expenses, expenseTotalCount, jazzcashPayments, jazzcashToday, billPayments] = await Promise.all([
     supabase.from('inventory_items').select('*').order('name'),
     supabase.from('categories').select('*').order('name'),
     supabase.from('suppliers').select('*').order('name'),
@@ -111,10 +113,11 @@ async function loadData() {
     supabase.from('employees').select('*').order('name'),
     supabase.from('attendance').select('*').gte('date', range[0]).lte('date', range[1]),
     state.attDate >= range[0] && state.attDate <= range[1] ? Promise.resolve({ data: [], error: null }) : supabase.from('attendance').select('*').eq('date', state.attDate),
+    supabase.from('attendance').select('employee_id, date').eq('paid', true).in('status', PRESENT).gte('date', state.expFrom).lte('date', state.expTo),
     supabase.from('candidates').select('*').order('created_at', { ascending: false }),
     supabase.from('advances').select('*').order('date', { ascending: false }),
     supabase.from('salary_payments').select('*').order('date', { ascending: false }).order('created_at', { ascending: false }),
-    supabase.from('market_lists').select('*').order('date', { ascending: false }).order('created_at', { ascending: false }).limit(100),
+    supabase.from('market_lists').select('*').gte('date', marketMonthRange[0]).lte('date', marketMonthRange[1]).order('date', { ascending: false }).order('created_at', { ascending: false }),
     supabase.from('market_lists').select('*').eq('status', 'bought').gte('date', state.expFrom).lte('date', state.expTo),
     supabase.from('expenses').select('*', { count: 'exact' }).gte('date', state.expFrom).lte('date', state.expTo).order('date', { ascending: false }).order('created_at', { ascending: false }),
     supabase.from('expenses').select('id', { count: 'exact', head: true }),
@@ -135,8 +138,8 @@ async function loadData() {
   state.dashboardExpenses = sumBy(dashboardExpenses.data, r => r.amount);
   state.dashboardMarket = sumBy(dashboardMarket.data, r => r.total_spent);
   const marketIds = (marketLists.data || []).map(l => l.id), marketItems = marketIds.length ? await supabase.from('market_items').select('*').in('list_id', marketIds) : { data: [] };
-  for (const result of [items, categories, suppliers, purchases, purchaseItems, adjustments, demands, demandItems, employees, attendance, attendanceDay, candidates, advances, salaryPayments, marketLists, marketRange, expenses, expenseTotalCount, jazzcashPayments, jazzcashToday, marketItems, billPayments]) if (result.error) throw migrationHint(result.error);
-  Object.assign(state, { items: items.data, categories: categories.data, suppliers: suppliers.data, purchases: purchases.data, purchaseItems: purchaseItems.data, adjustments: adjustments.data, demands: demands.data, demandItems: demandItems.data, employees: employees.data, attendance: [...attendance.data, ...attendanceDay.data], candidates: candidates.data, advances: advances.data, salaryPayments: salaryPayments.data, marketLists: marketLists.data, marketRange: marketRange.data, expenses: expenses.data, expenseRangeCount: expenses.count ?? expenses.data.length, expenseTotalCount: expenseTotalCount.count ?? 0, jazzcashPayments: jazzcashPayments.data, jazzcashToday: jazzcashToday.data, marketItems: marketItems.data, billPayments: billPayments.data });
+  for (const result of [items, categories, suppliers, purchases, purchaseItems, adjustments, demands, demandItems, employees, attendance, attendanceDay, dailySalaryAttendance, candidates, advances, salaryPayments, marketLists, marketRange, expenses, expenseTotalCount, jazzcashPayments, jazzcashToday, marketItems, billPayments]) if (result.error) throw migrationHint(result.error);
+  Object.assign(state, { items: items.data, categories: categories.data, suppliers: suppliers.data, purchases: purchases.data, purchaseItems: purchaseItems.data, adjustments: adjustments.data, demands: demands.data, demandItems: demandItems.data, employees: employees.data, attendance: [...attendance.data, ...attendanceDay.data], dailySalaryAttendance: dailySalaryAttendance.data, candidates: candidates.data, advances: advances.data, salaryPayments: salaryPayments.data, marketLists: marketLists.data, marketRange: marketRange.data, expenses: expenses.data, expenseRangeCount: expenses.count ?? expenses.data.length, expenseTotalCount: expenseTotalCount.count ?? 0, jazzcashPayments: jazzcashPayments.data, jazzcashToday: jazzcashToday.data, marketItems: marketItems.data, billPayments: billPayments.data });
 }
 
 // Missing table/column/unique index usually means employee_salary_payments.sql was not run on this Supabase project yet.
@@ -255,6 +258,85 @@ async function exportDashboardExpenses() {
   }
   const total = [...dailyTotals.values()].reduce((sum, amount) => sum + amount, 0);
   rows.push(['PERIOD TOTAL', '', '', '', '', '', '', total.toFixed(2)]);
+
+  const csv = `\uFEFF${rows.map(row => row.map(csvCell).join(',')).join('\r\n')}`;
+  const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = `stockroom-expenses-${from}-to-${to}.csv`;
+  document.body.append(link);
+  link.click();
+  link.remove();
+  window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+async function exportExpensesReport() {
+  const { expFrom: from, expTo: to } = state;
+  const [expenses, marketLists, salaryPayments, dailySalaryAttendance] = await Promise.all([
+    supabase.from('expenses').select('date, category, amount, note').gte('date', from).lte('date', to).order('date'),
+    supabase.from('market_lists').select('id, date, note, total_spent').eq('status', 'bought').gte('date', from).lte('date', to).order('date'),
+    supabase.from('salary_payments').select('date, employee_id, amount, note, salary_month').gte('date', from).lte('date', to).order('date'),
+    supabase.from('attendance').select('employee_id, date').eq('paid', true).in('status', PRESENT).gte('date', from).lte('date', to).order('date')
+  ]);
+  for (const result of [expenses, marketLists, salaryPayments, dailySalaryAttendance]) if (result.error) throw migrationHint(result.error);
+
+  const lists = marketLists.data || [], listIds = lists.map(list => list.id);
+  const marketItems = listIds.length
+    ? await supabase.from('market_items').select('list_id, name, quantity, unit, amount').in('list_id', listIds)
+    : { data: [], error: null };
+  if (marketItems.error) throw marketItems.error;
+
+  const linesByList = new Map(), employees = idMap(state.employees), records = (expenses.data || []).map(expense => ({
+    date: expense.date, type: 'Expense', category: expense.category, item: expense.note || '',
+    quantity: '', unit: '', amount: Number(expense.amount)
+  }));
+  for (const item of marketItems.data || []) {
+    const lines = linesByList.get(item.list_id) || [];
+    lines.push(item);
+    linesByList.set(item.list_id, lines);
+  }
+  for (const list of lists) {
+    const items = linesByList.get(list.id) || [];
+    if (!items.length) {
+      records.push({ date: list.date, type: 'Market purchase', category: list.note || '', item: '', quantity: '', unit: '', amount: Number(list.total_spent) });
+      continue;
+    }
+    for (const item of items) records.push({
+      date: list.date, type: 'Market item', category: list.note || '', item: item.name,
+      quantity: number(item.quantity), unit: item.unit || '', amount: Number(item.amount)
+    });
+  }
+  for (const payment of salaryPayments.data || []) {
+    const salaryMonth = String(payment.salary_month || payment.date).slice(0, 7);
+    records.push({
+      date: payment.date, type: 'Monthly salary', category: 'Salary', item: `${employees.get(payment.employee_id)?.name || 'Employee'} — Salary month: ${salaryMonth}${payment.note ? ` — ${payment.note}` : ''}`,
+      quantity: '', unit: '', amount: Number(payment.amount)
+    });
+  }
+  for (const attendance of dailySalaryAttendance.data || []) {
+    const employee = employees.get(attendance.employee_id);
+    if (employee?.salary_type !== 'daily') continue;
+    records.push({ date: attendance.date, type: 'Daily salary', category: 'Salary', item: employee.name, quantity: '1 day', unit: '', amount: Number(employee.salary) || 0 });
+  }
+  records.sort((a, b) => a.date.localeCompare(b.date) || a.type.localeCompare(b.type) || a.item.localeCompare(b.item));
+  const dailyTotals = new Map();
+  for (const record of records) dailyTotals.set(record.date, (dailyTotals.get(record.date) || 0) + record.amount);
+  const csvCell = value => {
+    let text = String(value ?? '');
+    if (/^[\s]*[=+\-@]/.test(text)) text = `'${text}`;
+    return `"${text.replace(/"/g, '""')}"`;
+  };
+  const rows = [['Date', 'Record type', 'Category / market note', 'Item / employee / note', 'Quantity', 'Unit', 'Amount (Rs.)', 'Daily total (Rs.)']];
+  let previousDate = '';
+  for (const record of records) {
+    const firstForDay = record.date !== previousDate;
+    rows.push([
+      record.date, record.type, record.category, record.item, record.quantity, record.unit,
+      record.amount.toFixed(2), firstForDay ? (dailyTotals.get(record.date) || 0).toFixed(2) : ''
+    ]);
+    previousDate = record.date;
+  }
+  rows.push(['PERIOD TOTAL', '', '', '', '', '', '', sumBy(records, record => record.amount).toFixed(2)]);
 
   const csv = `\uFEFF${rows.map(row => row.map(csvCell).join(',')).join('\r\n')}`;
   const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
@@ -548,7 +630,37 @@ function renderMarket() {
     const itemsText = ls.map(i => `${i.name} × ${number(i.quantity)} ${i.unit}`).join(', ') || '—';
     return `<tr><td><strong>${fmtDate(l.date)}</strong>${l.note ? `<span class="cell-sub">${esc(l.note)}</span>` : ''}</td><td title="${esc(itemsText)}">${esc(truncateText(itemsText))}</td><td>${done ? `<strong>${money(l.total_spent)}</strong>` : '—'}</td><td><span class="badge ${done ? 'badge-good' : 'badge-low'}">${done ? 'Bought' : 'To buy'}</span></td><td><div class="table-actions"><button class="action-button" data-action="print-market" data-id="${l.id}">Print</button><button class="action-button" data-action="edit-market" data-id="${l.id}">Edit list</button><button class="action-button" data-action="market-prices" data-id="${l.id}">${done ? 'Edit prices' : 'Prices'}</button><button class="action-button danger" data-action="delete-market" data-id="${l.id}">Delete</button></div></td></tr>`;
   }).join('') : '<tr><td colspan="5"><div class="empty-state"><strong>Abhi koi market list nahi</strong>Taza saman (sabzi, dhaniya) ki roz ki list yahan banayein.</div></td></tr>';
-  return `${heading('Market Purchase', 'Roz market se kharidne wala taza saman. Ye stock mein nahi jata, sirf kharcha banta hai.', '<button class="button button-primary" data-action="add-market">+ New list</button>')}${totalChips([['Total kharcha (Bought lists)', money(marketSpent)], ['Kharidna baqi (lists)', marketOpen]])}<section class="panel"><div class="table-scroll"><table><thead><tr><th>DATE</th><th>ITEMS</th><th>SPENT</th><th>STATUS</th><th></th></tr></thead><tbody>${rows}</tbody></table></div><div class="table-footer">${state.marketLists.length} lists · Spent <strong>${money(marketSpent)}</strong></div></section>`;
+  return `${heading('Market Purchase', 'Roz market se kharidne wala taza saman. Ye stock mein nahi jata, sirf kharcha banta hai.', `<input id="market-month-filter" class="filter-control" type="month" value="${esc(state.marketMonth)}" aria-label="Filter market purchases by month"><button class="button" data-action="download-market-month">Download CSV</button><button class="button button-primary" data-action="add-market">+ New list</button>`)}${totalChips([[`Kharcha (${state.marketMonth})`, money(marketSpent)], ['Kharidna baqi (lists)', marketOpen]])}<section class="panel"><div class="table-scroll"><table><thead><tr><th>DATE</th><th>ITEMS</th><th>SPENT</th><th>STATUS</th><th></th></tr></thead><tbody>${rows}</tbody></table></div><div class="table-footer">${state.marketLists.length} lists · Is month spent <strong>${money(marketSpent)}</strong></div></section>`;
+}
+
+function downloadMarketMonth() {
+  const boughtLists = state.marketLists.filter(list => list.status === 'bought');
+  const linesByList = new Map();
+  for (const item of state.marketItems) {
+    const lines = linesByList.get(item.list_id) || [];
+    lines.push(item);
+    linesByList.set(item.list_id, lines);
+  }
+  const csvCell = value => {
+    let text = String(value ?? '');
+    if (/^[\s]*[=+\-@]/.test(text)) text = `'${text}`;
+    return `"${text.replace(/"/g, '""')}"`;
+  };
+  const rows = [['Date', 'Market note', 'Items purchased', 'List total (Rs.)']];
+  for (const list of boughtLists) {
+    const items = (linesByList.get(list.id) || []).map(item => `${item.name} × ${number(item.quantity)} ${item.unit || ''} (${Number(item.amount).toFixed(2)})`).join('; ');
+    rows.push([list.date, list.note, items, Number(list.total_spent).toFixed(2)]);
+  }
+  rows.push(['MONTH TOTAL', '', `${boughtLists.length} bought list${boughtLists.length === 1 ? '' : 's'}`, sumBy(boughtLists, list => list.total_spent).toFixed(2)]);
+  const csv = `\uFEFF${rows.map(row => row.map(csvCell).join(',')).join('\r\n')}`;
+  const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = `market-purchase-${state.marketMonth}.csv`;
+  document.body.append(link);
+  link.click();
+  link.remove();
+  window.setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
 function marketRow(item = null) {
@@ -589,16 +701,23 @@ function matchingExpenses() {
 }
 
 function expenseTotals(expenses = state.expenses) {
-  const byCat = new Map(), market = state.marketRange.reduce((t, l) => t + Number(l.total_spent), 0);
+  const byCat = new Map(), market = sumBy(state.marketRange, list => list.total_spent);
   expenses.forEach(e => byCat.set(e.category, (byCat.get(e.category) || 0) + Number(e.amount)));
-  const spent = [...byCat.values()].reduce((t, v) => t + v, 0);
-  return { byCat, market, spent, total: spent + market };
+  const spent = round2([...byCat.values()].reduce((t, v) => t + v, 0));
+  const employees = idMap(state.employees);
+  const dailySalary = sumBy(state.dailySalaryAttendance, row => {
+    const employee = employees.get(row.employee_id);
+    return employee?.salary_type === 'daily' ? employee.salary : 0;
+  });
+  const monthlySalary = sumBy(state.salaryPayments.filter(payment => payment.date >= state.expFrom && payment.date <= state.expTo), payment => payment.amount);
+  const salaries = round2(dailySalary + monthlySalary);
+  return { byCat, market, dailySalary, monthlySalary, salaries, spent, total: round2(spent + market + salaries) };
 }
 
 function renderExpenses() {
   const expenses = matchingExpenses(), t = expenseTotals(expenses), rows = expenses.length ? expenses.map((e, index) => `<tr><td>${index + 1}</td><td>${fmtDate(e.date)}</td><td><strong>${esc(e.category)}</strong></td><td>${esc(e.note || '—')}</td><td><strong>${money(e.amount)}</strong></td><td><div class="table-actions"><button class="action-button" data-action="edit-expense" data-id="${e.id}">Edit</button><button class="action-button danger" data-action="delete-expense" data-id="${e.id}">Delete</button></div></td></tr>`).join('') : `<tr><td colspan="6"><div class="empty-state"><strong>${state.expenseSearch ? 'Koi matching expense nahi' : 'In dino ka koi kharcha nahi'}</strong>${state.expenseSearch ? 'Search ka lafz ya date range badal kar dekhein.' : '+ Add expense se likhein.'}</div></td></tr>`;
-  const chips = [...t.byCat].map(([k, v]) => `<span class="chip">${esc(k)} <strong>${money(v)}</strong></span>`).join('') + (t.market ? `<span class="chip">Market purchase <strong>${money(t.market)}</strong></span>` : '');
-  return `${heading('Expenses', 'Roz ke kharche: kahan kitna laga.', `<input id="exp-from" class="filter-control" type="date" value="${state.expFrom}"><input id="exp-to" class="filter-control" type="date" value="${state.expTo}"><button class="button" data-action="exp-today">Aaj</button><button class="button" data-action="print-expenses">Print</button><button class="button" data-action="add-expense-category">+ Add category</button><button class="button button-primary" data-action="add-expense">+ Add expense</button>`)}<div class="chip-row">${chips || '<span class="chip">Koi kharcha nahi</span>'}</div><section class="panel"><div class="table-toolbar"><input id="expense-search" class="filter-control" type="search" placeholder="Category, note, date ya amount search karein" aria-label="Search expenses" value="${esc(state.expenseSearch)}"></div><div class="table-scroll"><table><thead><tr><th>#</th><th>DATE</th><th>CATEGORY</th><th>NOTE</th><th>AMOUNT</th><th></th></tr></thead><tbody>${rows}</tbody></table></div><div class="table-footer">${expenses.length} shown of ${state.expenseRangeCount} in range · All time ${state.expenseTotalCount} · Expenses <strong>${money(t.spent)}</strong> · Market <strong>${money(t.market)}</strong> · Total <strong>${money(t.total)}</strong></div></section>`;
+  const chips = [...t.byCat].map(([k, v]) => `<span class="chip">${esc(k)} <strong>${money(v)}</strong></span>`).join('') + (t.market ? `<span class="chip">Market purchase <strong>${money(t.market)}</strong></span>` : '') + (t.salaries ? `<span class="chip">Monthly salaries <strong>${money(t.salaries)}</strong></span>` : '');
+  return `${heading('Expenses', 'Roz ke kharche: kahan kitna laga.')}<div class="expenses-toolbar"><input id="exp-from" class="filter-control" type="date" value="${state.expFrom}" aria-label="Expenses from date"><input id="exp-to" class="filter-control" type="date" value="${state.expTo}" aria-label="Expenses to date"><button class="button" data-action="exp-today">Aaj</button><button class="button" data-action="exp-month">This month</button><button class="button" data-action="download-expenses">Download Excel</button><button class="button" data-action="print-expenses">Print</button><button class="button" data-action="add-expense-category">+ Add category</button><button class="button button-primary" data-action="add-expense">+ Add expense</button></div><div class="chip-row">${chips || '<span class="chip">Koi kharcha nahi</span>'}</div><section class="panel"><div class="table-toolbar"><input id="expense-search" class="filter-control" type="search" placeholder="Category, note, date ya amount search karein" aria-label="Search expenses" value="${esc(state.expenseSearch)}"></div><div class="table-scroll"><table><thead><tr><th>#</th><th>DATE</th><th>CATEGORY</th><th>NOTE</th><th>AMOUNT</th><th></th></tr></thead><tbody>${rows}</tbody></table></div><div class="table-footer">${expenses.length} shown of ${state.expenseRangeCount} in range · All time ${state.expenseTotalCount} · Expenses <strong>${money(t.spent)}</strong> · Market <strong>${money(t.market)}</strong> · Salaries <strong>${money(t.salaries)}</strong> · Total <strong>${money(t.total)}</strong></div></section>`;
 }
 
 function expenseForm(expense = null) {
@@ -614,7 +733,8 @@ function printExpenses() {
   const expenses = matchingExpenses(), t = expenseTotals(expenses), multi = state.expFrom !== state.expTo, short = d => `${d.slice(8)}/${d.slice(5, 7)}`;
   const rows = expenses.map((e, index) => [String(index + 1), `${multi ? short(e.date) + ' ' : ''}${e.category}${e.note ? ': ' + e.note : ''}`, number(e.amount)]);
   if (t.market) rows.push([String(rows.length + 1), 'Market purchase (daily)', number(t.market)]);
-  printSlip({ title: 'DAILY EXPENSES', code: 'EXP', dateText: multi ? `${fmtDate(state.expFrom)} - ${fmtDate(state.expTo)}` : fmtDate(state.expFrom), head: ['#', 'Item', 'Amount'], rows, totals: [['Expenses :', String(expenses.length)], ['Total Rs :', number(t.total)]], columnLayout: 'numbered' });
+  if (t.salaries) rows.push([String(rows.length + 1), 'Salaries (daily + monthly)', number(t.salaries)]);
+  printSlip({ title: 'DAILY EXPENSES', code: 'EXP', dateText: multi ? `${fmtDate(state.expFrom)} - ${fmtDate(state.expTo)}` : fmtDate(state.expFrom), head: ['#', 'Item', 'Amount'], rows, totals: [['Expenses :', String(expenses.length)], ['Market purchase :', number(t.market)], ['Salaries :', number(t.salaries)], ['Total Rs :', number(t.total)]], columnLayout: 'numbered' });
 }
 
 function renderJazzcash() {
@@ -937,6 +1057,7 @@ document.addEventListener('click', async event => {
       case 'print-staff-slip': printStaffSlip(id); break;
       case 'employee-detail': employeeDetail(id); break;
       case 'add-market': marketForm(); break;
+      case 'download-market-month': downloadMarketMonth(); break;
       case 'edit-market': {
         const list = state.marketLists.find(entry => entry.id === id);
         if (!list) throw new Error('Market list nahi mili. Page refresh karke dobara try karein.');
@@ -956,6 +1077,8 @@ document.addEventListener('click', async event => {
       case 'delete-jazzcash-payment': await removeRecord('jazzcash_payments', id, 'payment'); break;
       case 'all-payment-dates': state.cashFrom = state.cashTo = ''; await loadData(); render(); break;
       case 'exp-today': state.expFrom = state.expTo = today(); await loadData(); render(); break;
+      case 'exp-month': [state.expFrom, state.expTo] = monthRange(today().slice(0, 7)); await loadData(); render(); break;
+      case 'download-expenses': await exportExpensesReport(); break;
       case 'add-advance': advanceForm(); break;
       case 'delete-advance': await removeRecord('advances', id, 'advance'); break;
       case 'add-salary-payment': salaryPaymentForm(); break;
@@ -1048,6 +1171,16 @@ document.addEventListener('change', event => {
   if (event.target.id === 'inventory-category-filter' || event.target.id === 'inventory-status-filter') refreshInventoryRows();
   if (event.target.id === 'purchase-date-filter') { state.purchaseFilter.date = event.target.value; render(); }
   if (event.target.id === 'purchase-supplier-filter') { state.purchaseFilter.supplier = event.target.value; render(); }
+  if (event.target.id === 'market-month-filter' && /^\d{4}-(0[1-9]|1[0-2])$/.test(event.target.value)) {
+    const filter = event.target, previousMonth = state.marketMonth;
+    state.marketMonth = filter.value;
+    filter.disabled = true;
+    loadData().then(render).catch(error => {
+      state.marketMonth = previousMonth;
+      render();
+      toast(error.message, true);
+    });
+  }
   if (event.target.id === 'report-date-filter') { state.reportFilter = event.target.value; render(); }
   if (event.target.id === 'report-from') { state.customFrom = event.target.value; render(); }
   if (event.target.id === 'report-to') { state.customTo = event.target.value; render(); }

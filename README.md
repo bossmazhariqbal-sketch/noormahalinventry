@@ -51,6 +51,7 @@ Inventory wala hissa aur Staff wala hissa **alag alag** hain. Dono ki tables aur
 - Item ko Edit karke stock nahi badalta. Stock badalne ke liye Purchase ya Adjust stock use karein, taake history bani rahe.
 - Dashboard ka **Total expense** chune hue din, mahine ya saal ke Expenses aur bought Market Purchase ko jama karta hai.
 - Dashboard ka **Download Excel report** button selected period ki har expense entry, bought market items aur date-wise total ko Excel-compatible CSV file mein download karta hai.
+- Expenses page par date range ya **This month** se filter karein. Paid daily attendance aur monthly salary payments bhi total mein shamil hain; **Monthly salaries** chip dono salary types ka total dikhata hai. **Download Excel** report mein expenses, market items, per-day wages, monthly salary payments aur date-wise totals aate hain.
 
 ### Supplier ka udhaar (Pending Bills)
 - **Purchase save karte waqt** Payment chunein: **Paid** (poora ada), **Pending** (udhaar) ya **Partial** (kuch rakam di, baqi udhaar). Pending ya Partial ke liye supplier chunna zaroori hai.
@@ -84,6 +85,7 @@ Agar demand ka koi saman store mein nahi hai: wo jaldi kharab hone wala ho to **
 2. **Print**: market le jane wali slip. Price ke khane khali ("_____") hote hain.
 3. Wapas aa kar **Prices** dabayein aur har item par lagi rakam likhein. List **Bought** ho jati hai aur total ban jata hai. Galti ho to **Edit prices**.
 4. Dobara Print karne par rakam aur total bhi aate hain. Ye total Expenses mein "Market purchase" ban kar shamil hota hai.
+5. Month filter se selected month ki bought lists aur total dekhein; **Download CSV** se us mahine ka items/amounts report download karein.
 
 ### Expenses (roz ke kharche)
 - **+ Add expense**: date, category (Gas, Electricity, Rent, Fuel / Delivery, Repair & Maintenance, Staff Food, Cleaning, Other), amount, note.

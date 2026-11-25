@@ -146,3 +146,5 @@ button:disabled.is-loading{cursor:wait}
 .purchase-rows{display:grid;gap:8px;margin:14px 0 8px}.purchase-row{display:grid;grid-template-columns:minmax(0,1.7fr) minmax(72px,.65fr) minmax(105px,1fr) 36px;gap:8px;align-items:center}.purchase-row input,.purchase-row select{width:100%;height:44px;min-width:0;padding:0 9px;border:1px solid #e3e8e2;border-radius:5px;background:#fff;color:#303a32;font-size:14px}.purchase-payment-fields{margin-top:14px}.purchase-payment-fields .amount-preview .form-help{display:block;clear:both;margin-top:8px}
 @media(max-width:420px){.purchase-row{grid-template-columns:minmax(0,1fr) minmax(65px,.6fr) minmax(88px,.9fr) 32px;gap:5px}.purchase-row input,.purchase-row select{padding:0 6px;font-size:12px}}
 @media(prefers-reduced-motion:reduce){button.is-loading::before{animation-duration:1.5s}}
+.expenses-toolbar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:-10px 0 18px}.expenses-toolbar .filter-control{flex:0 1 152px;min-width:130px}
+@media print{.expenses-toolbar{display:none!important}}
