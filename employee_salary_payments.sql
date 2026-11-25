@@ -32,7 +32,9 @@ create table if not exists public.salary_payments (
   owner_id uuid not null default auth.uid() references auth.users(id) on delete cascade,
   employee_id uuid not null,
   date date not null default current_date,
+  salary_month date not null default date_trunc('month', current_date)::date,
   amount numeric(12,2) not null check (amount > 0),
+  is_settlement boolean not null default false,
   note text not null default '',
   created_at timestamptz not null default now(),
   foreign key (employee_id, owner_id) references public.employees(id, owner_id) on delete cascade
@@ -46,6 +48,7 @@ alter table public.salary_payments alter column salary_month set not null;
 alter table public.salary_payments drop constraint if exists salary_payments_month_first_day;
 alter table public.salary_payments add constraint salary_payments_month_first_day
   check (salary_month = date_trunc('month', salary_month)::date);
+alter table public.salary_payments add column if not exists is_settlement boolean not null default false;
 
 create index if not exists salary_payments_owner_date_idx
   on public.salary_payments(owner_id, date desc);

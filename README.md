@@ -102,7 +102,7 @@ Agar demand ka koi saman store mein nahi hai: wo jaldi kharab hone wala ho to **
 ## 3. Staff wala hissa
 
 ### Employees
-Name, phone, **joining date**, role, salary aur salary type (Monthly ya Daily). Jo kaam chhor jaye use Edit karke "Abhi kaam kar raha hai" ka nishan hata dein, is se purani hazri bachi rehti hai. Delete karne par us ki hazri, advances aur salary payments bhi delete ho jate hain.
+Name, phone, **joining date**, role, salary aur salary type (Monthly ya Daily). Monthly salary ke saath chune hue salary month ka Paid, Balance aur status bhi nazar aata hai; ye Salary Payments save karne par update hota hai. Jo kaam chhor jaye use Edit karke "Abhi kaam kar raha hai" ka nishan hata dein, is se purani hazri bachi rehti hai. Delete karne par us ki hazri, advances aur salary payments bhi delete ho jate hain.
 
 Salary Employees, Attendance, Hiring, Advances aur Staff Report mein **stars (Rs. ****)** mein chhupi rehti hai. **Show salary** dabane par nazar aati hai. Doosre page par jate hi dobara chhup jati hai.
 
@@ -119,7 +119,7 @@ Kisi ne advance liya ho to employee, date, amount aur note likhein. Ye us mahine
 - **Daily pay:** jin employees ki salary type Daily hai un ke saamne **Paid / Unpaid** chunein (sirf On time ya Late wale din). Neeche us din ka total Paid, Unpaid aur Total dikhta hai.
 - **Save attendance**. Usi din dobara save karne par purani entry update hoti hai (ek employee ki ek date par ek hi entry, duplicate nahi banti). Purani date (doosre mahine ki bhi) chun kar save karein to wo date wapas load ho kar nazar aati hai.
 - Status badalte hi neeche Paid / Unpaid / Total foran update hota hai. **Show salary** dabane se abhi save na hui selections nahi jatin.
-- **Salary Payments** page par monthly salary ki har partial ya full payment employee, date, **Salary month**, amount aur note ke saath record karein. Salary month wo mahina hai jis ki salary di ja rahi hai (masalan 1 March ko February ki salary: date = 1 March, Salary month = February). Payment list mein dikhti hai aur Delete ho sakti hai. Daily salary ki Paid/Unpaid entry Attendance mein save hoti hai.
+- **Salary Payments** page par monthly salary ki payment employee, date, **Salary month**, amount aur note ke saath record karein. Salary month wo mahina hai jis ki salary di ja rahi hai (masalan 1 March ko February ki salary: date = 1 March, Salary month = February). Payment save karne par Staff Report ka selected month bhi usi salary month par set ho jata hai. Payment list mein dikhti hai aur Delete ho sakti hai. Daily salary ki Paid/Unpaid entry Attendance mein save hoti hai.
 
 ### Har page par rupees ke totals
 - **Dashboard** ("Is mahine ka paisa"): JazzCash/QR se kitna aaya; supplier ko kitna diya, Market, Kharche, Staff salary aur Advance mein kitna laga; total laga; supplier ka udhaar kitna baqi. Cash sale record nahi hoti, is liye "Aaya" sirf JazzCash/QR hai.
@@ -133,6 +133,7 @@ Kisi ne advance liya ho to employee, date, amount aur note likhein. Ye us mahine
 ### Staff Report (mahine ke hisab se)
 - Har employee ki apni row: Present / Absent / Leave, **Salary days** (kitne din ki salary bani), Earned, Advance, **Paid** (kitni rakam aur kitne din ki), **Pending** (kitni rakam aur kitne din baqi) aur status (Pending / Clear / Advance zyada).
 - Sab se neeche aur upar **sab employees ka total**.
+- Monthly employee ke **Paid/Unpaid** dropdown se baqi poora salary balance ek saath Paid mark karein. Dobara Unpaid karne par sirf isi dropdown ki settlement hat'ti hai; pehle ki payment history rehti hai. Daily staff ka Paid/Unpaid Attendance mein hi manage hota hai.
 - **Details** dabayein: us employee ke mahine ki poori tafseel (har din ki hazri, daily Paid/Unpaid, advances, salary payments).
 - Per day rate: Daily = salary. Monthly = salary / mahine ke din.
 - **Present** = On time + Late
@@ -143,6 +144,7 @@ Kisi ne advance liya ho to employee, date, amount aur note likhein. Ye us mahine
   - Monthly: salary - (salary / mahine ke din x absent din). Leave ki katoti nahi. Saari rakam 2 decimal tak round hoti hai.
   - Daily: salary x present din.
   - **Advance** = us mahine ke advances. **Paid** = daily employees ke Attendance par Paid din ki rakam, ya monthly employees ki us **Salary month** ki Salary Payments. **Balance** = Earned - Advance - Paid, yaani abhi dena baqi.
+  - Payment aur advance ke baad balance zero ho to status **Done** ya **Clear** hota hai; baqi dena ho to **Pending**, aur balance zero se kam ho to **Advance zyada**. Salary payment record, update ya delete karne par Employees aur Staff Report dono refresh hote hain.
   - Jis din hazri nahi lagi us din ki katoti nahi hoti, is liye roz hazri lagana zaroori hai.
 - Har employee ke saamne **Print** se us mahine ka alag salary statement thermal printer par nikalein ya browser print dialog mein **Save as PDF** chunein. Statement mein salary rate, present, absent, leave, earned salary, advance, paid aur remaining alag dikhte hain. Salary chhupi ho to pehle **Show salary** karein. 58mm/80mm size Staff Report par chuna ja sakta hai.
 - Ye andaza hai. Bonus ya late ki katoti shamil nahi. Monthly salary ki payment history Salary Payments page mein save hoti hai.
@@ -158,16 +160,18 @@ Kisi ne advance liya ho to employee, date, amount aur note likhein. Ye us mahine
 - Incoming JazzCash/QR payments: `jazzcash_payments`
 - Staff: `employees`, `attendance`, `candidates` (hiring), `advances`, `salary_payments`
 
-Functions `record_purchase`, `adjust_stock`, `save_demand`, `complete_demand`, `save_market_list`, `update_market_list`, `complete_market_list`, `pay_bill`, `pay_supplier` stock/data ko mehfooz tareeqe se badalte hain. Ye ek transaction mein chalte hain, is liye error aaye to aadha data save nahi hota.
+Functions `record_purchase`, `update_purchase`, `adjust_stock`, `save_demand`, `complete_demand`, `save_market_list`, `update_market_list`, `complete_market_list`, `pay_bill`, `pay_supplier` stock/data ko mehfooz tareeqe se badalte hain. Ye ek transaction mein chalte hain, is liye error aaye to aadha data save nahi hota.
 
 SQL files: `supabase/schema.sql` (inventory), `supabase/demand_staff.sql` (demand, staff, market, kharche), `supabase/pending_bills.sql` (supplier udhaar), `supabase/jazzcash_payments.sql` (JazzCash/QR payments), aur `supabase/employee_salary_payments.sql` (attendance compatibility aur monthly salary payment history). Naye project par is tarteeb se chalayein: `schema.sql`, `demand_staff.sql`, `pending_bills.sql`, `jazzcash_payments.sql`, `employee_salary_payments.sql`. **Existing Supabase project par (staff migration):**
 1. Supabase > SQL Editor > New query.
 2. `employee_salary_payments.sql` ka poora text paste karke **Run** dabayein. Ye dobara chalane par bhi safe hai.
-3. Ye file: `attendance.paid` column lagati hai, purani duplicate attendance (same employee + date) hata kar sab se nayi rakhti hai, `unique (employee_id, date)` index banati hai, `salary_payments` table aur `salary_month` column banati/badalti hai, RLS policy aur grants (sirf signed-in owner) lagati hai.
+3. Ye file: `attendance.paid` column lagati hai, purani duplicate attendance (same employee + date) hata kar sab se nayi rakhti hai, `unique (employee_id, date)` index banati hai, `salary_payments` table aur `salary_month`/`is_settlement` columns banati/badalti hai, RLS policy aur grants (sirf signed-in owner) lagati hai. Existing project mein Staff Report Paid/Unpaid dropdown chalane ke liye bhi ye migration dobara run karein.
 4. Check (alag run karein): `select employee_id, date, count(*) from public.attendance group by 1, 2 having count(*) > 1;` ka natija khali hona chahiye.
 5. App ko refresh karein (Ctrl+F5).
 
 Existing project par Daily Demand editing enable karne ke liye Supabase > SQL Editor mein `supabase/demand_staff.sql` ka poora text ek baar dobara run karein; is se `update_demand` function install aur PostgREST schema cache reload hota hai. Ye script dobara chalane par bhi safe hai. Run successful hone ke baad app ko Ctrl+F5 se refresh karein. Agar Daily Demand edit karte waqt `Could not find the function public.update_demand(...) in the schema cache` ya Market Purchase edit karte waqt `Could not find the function public.update_market_list(...) in the schema cache` aaye to bhi yehi karein.
+
+Existing project par purchase list/edit enable karne ke liye Supabase > SQL Editor mein `supabase/pending_bills.sql` ka poora text dobara run karein, phir app ko Ctrl+F5 se refresh karein. Ye migration `update_purchase` RPC install karti hai; purchase edit stock ko net quantity difference se adjust karti hai aur pehle se recorded payments ko preserve karti hai.
 
 Agar app mein "relation salary_payments does not exist" ya "no unique constraint matching ON CONFLICT" jaisa error aaye to is ka matlab hai ye SQL abhi run nahi hui.
 

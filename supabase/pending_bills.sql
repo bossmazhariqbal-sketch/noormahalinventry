@@ -54,6 +54,97 @@ end; $$;
 revoke all on function public.record_purchase(date, uuid, jsonb, numeric) from public;
 grant execute on function public.record_purchase(date, uuid, jsonb, numeric) to authenticated;
 
+create or replace function public.update_purchase(p_purchase_id uuid, p_date date, p_supplier_id uuid, p_items jsonb)
+returns void language plpgsql security invoker set search_path = '' as $$
+declare
+  v_owner uuid := auth.uid();
+  v_paid numeric(14,2);
+  v_total numeric(14,2) := 0;
+  v_line_total numeric(14,2);
+  v_line record;
+  v_delta record;
+  v_item_id uuid;
+  v_quantity numeric(12,3);
+  v_cost numeric(12,2);
+  v_stock numeric(12,3);
+begin
+  if v_owner is null then raise exception 'Sign in is required'; end if;
+  if p_items is null or jsonb_typeof(p_items) <> 'array' or jsonb_array_length(p_items) = 0 then raise exception 'Add at least one purchase item'; end if;
+
+  select paid_amount into v_paid
+  from public.purchases where id = p_purchase_id and owner_id = v_owner for update;
+  if not found then raise exception 'Purchase not found'; end if;
+  if p_supplier_id is not null and not exists (select 1 from public.suppliers where id = p_supplier_id and owner_id = v_owner) then raise exception 'Supplier not found'; end if;
+
+  perform 1
+  from public.inventory_items i
+  where i.owner_id = v_owner and i.id in (
+    select pi.item_id from public.purchase_items pi where pi.purchase_id = p_purchase_id and pi.owner_id = v_owner
+    union
+    select (line.value ->> 'item_id')::uuid from jsonb_array_elements(p_items) line
+  )
+  order by i.id
+  for update;
+
+  for v_line in select value from jsonb_array_elements(p_items) loop
+    v_item_id := (v_line.value ->> 'item_id')::uuid;
+    v_quantity := (v_line.value ->> 'quantity')::numeric;
+    v_cost := (v_line.value ->> 'cost_per_unit')::numeric;
+    if v_quantity is null or v_quantity <= 0 or v_cost is null or v_cost < 0 then raise exception 'Quantity must be positive and cost cannot be negative'; end if;
+    perform 1 from public.inventory_items where id = v_item_id and owner_id = v_owner;
+    if not found then raise exception 'Inventory item not found'; end if;
+    v_total := v_total + round(v_quantity * v_cost, 2);
+  end loop;
+
+  if v_paid > v_total then raise exception 'Purchase total cannot be less than the amount already paid (%)', v_paid; end if;
+  if v_paid < v_total and p_supplier_id is null then raise exception 'Pending bill ke liye supplier chunein'; end if;
+
+  for v_delta in
+    select changes.item_id, sum(changes.quantity_delta) as quantity_delta
+    from (
+      select pi.item_id, -sum(pi.quantity) as quantity_delta
+      from public.purchase_items pi
+      where pi.purchase_id = p_purchase_id and pi.owner_id = v_owner
+      group by pi.item_id
+      union all
+      select (line.value ->> 'item_id')::uuid, sum((line.value ->> 'quantity')::numeric)
+      from jsonb_array_elements(p_items) line
+      group by (line.value ->> 'item_id')::uuid
+    ) changes
+    group by changes.item_id
+    order by changes.item_id
+  loop
+    select current_stock into v_stock
+    from public.inventory_items where id = v_delta.item_id and owner_id = v_owner for update;
+    if not found then raise exception 'Inventory item not found'; end if;
+    if v_stock + v_delta.quantity_delta < 0 then
+      raise exception 'Purchase edit se item ka stock negative ho jayega; pehle stock theek karein.';
+    end if;
+    update public.inventory_items
+    set current_stock = current_stock + v_delta.quantity_delta
+    where id = v_delta.item_id and owner_id = v_owner;
+  end loop;
+
+  delete from public.purchase_items where purchase_id = p_purchase_id and owner_id = v_owner;
+  for v_line in select value from jsonb_array_elements(p_items) loop
+    v_item_id := (v_line.value ->> 'item_id')::uuid;
+    v_quantity := (v_line.value ->> 'quantity')::numeric;
+    v_cost := (v_line.value ->> 'cost_per_unit')::numeric;
+    v_line_total := round(v_quantity * v_cost, 2);
+    insert into public.purchase_items (owner_id, purchase_id, item_id, quantity, cost_per_unit, total)
+    values (v_owner, p_purchase_id, v_item_id, v_quantity, v_cost, v_line_total);
+    update public.inventory_items set cost_per_unit = v_cost where id = v_item_id and owner_id = v_owner;
+  end loop;
+
+  update public.purchases
+  set date = coalesce(p_date, current_date), supplier_id = p_supplier_id, total_amount = v_total
+  where id = p_purchase_id and owner_id = v_owner;
+  update public.bill_payments set supplier_id = p_supplier_id
+  where purchase_id = p_purchase_id and owner_id = v_owner;
+end; $$;
+revoke all on function public.update_purchase(uuid, date, uuid, jsonb) from public;
+grant execute on function public.update_purchase(uuid, date, uuid, jsonb) to authenticated;
+
 create or replace function public.pay_bill(p_purchase_id uuid, p_amount numeric, p_date date, p_note text)
 returns uuid language plpgsql security invoker set search_path = '' as $$
 declare v_owner uuid := auth.uid(); v_due numeric; v_supplier uuid; v_id uuid := gen_random_uuid();

@@ -1,5 +1,5 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
-import { PRESENT, round2, monthRange, monthAttendance, calcStaffStats, staffTotals, attendanceTotals, paymentMonth } from './staff-calc.js';
+import { PRESENT, round2, monthRange, monthAttendance, calcStaffStats, staffTotals, attendanceTotals, paymentMonth, staffPaymentStatus, salarySettlementAmount, isSalaryPaid } from './staff-calc.js';
 
 const config = window.APP_CONFIG || {};
 const configured = config.supabaseUrl?.startsWith('https://') && config.supabaseAnonKey && !config.supabaseAnonKey.includes('YOUR_');
@@ -141,7 +141,7 @@ async function loadData() {
 
 // Missing table/column/unique index usually means employee_salary_payments.sql was not run on this Supabase project yet.
 function migrationHint(error) {
-  if (['PGRST205', 'PGRST204', '42P01', '42703', '42P10'].includes(error?.code) || /salary_payments|salary_month|column .*paid/.test(error?.message || '')) error.message = `${error.message} — Supabase SQL Editor mein employee_salary_payments.sql run karein (README: Staff migration).`;
+  if (['PGRST205', 'PGRST204', '42P01', '42703', '42P10'].includes(error?.code) || /salary_payments|salary_month|is_settlement|column .*paid/.test(error?.message || '')) error.message = `${error.message} — Supabase SQL Editor mein employee_salary_payments.sql dobara run karein (README: Staff migration).`;
   return error;
 }
 
@@ -285,7 +285,7 @@ function renderPurchases() {
   const rows = rowsData.length ? rowsData.map(purchase => {
     const lines = linesByPurchase.get(purchase.id) || [];
     const labels = lines.map(line => `${items.get(line.item_id)?.name || 'Item'} × ${number(line.quantity)}`).join(', ');
-    return `<tr><td>${esc(purchase.date)}</td><td><strong>${esc(suppliers.get(purchase.supplier_id)?.name || 'No supplier')}</strong></td><td>${esc(labels || 'No items')}</td><td>${lines.reduce((sum, line) => sum + Number(line.quantity), 0)}</td><td><strong>${money(purchase.total_amount)}</strong></td><td>${payBadge(purchase)}</td><td>${billDue(purchase) > 0 ? `<button class="action-button" data-action="pay-bill" data-id="${purchase.id}">Pay</button>` : ''}</td></tr>`;
+    return `<tr><td>${esc(purchase.date)}</td><td><strong>${esc(suppliers.get(purchase.supplier_id)?.name || 'No supplier')}</strong></td><td title="${esc(labels || 'No items')}">${esc(truncateText(labels || 'No items'))}</td><td>${lines.reduce((sum, line) => sum + Number(line.quantity), 0)}</td><td><strong>${money(purchase.total_amount)}</strong></td><td>${payBadge(purchase)}</td><td><div class="table-actions">${billDue(purchase) > 0 ? `<button class="action-button" data-action="pay-bill" data-id="${purchase.id}">Pay</button>` : ''}<button class="action-button" data-action="edit-purchase" data-id="${purchase.id}">Edit</button></div></td></tr>`;
   }).join('') : '<tr><td colspan="7"><div class="empty-state"><strong>No purchases found</strong>Saved purchases will appear here.</div></td></tr>';
   const billed = sumBy(rowsData, p => p.total_amount), paidSum = sumBy(rowsData, p => p.paid_amount), dueSum = round2(billed - paidSum);
   return `${heading('Purchases', 'Every purchase updates inventory stock automatically.', '<button class="button button-primary" data-action="open-purchase">+ Add purchase</button>')}${totalChips([['Total purchase', money(billed)], ['Ada kiya (Paid)', money(paidSum)], ['Baqi (Pending)', money(dueSum), dueSum > 0 ? 'due' : '']])}<section class="panel"><div class="table-toolbar"><input id="purchase-date-filter" class="filter-control" type="date" value="${esc(state.purchaseFilter.date)}" aria-label="Filter by date"><select id="purchase-supplier-filter" class="filter-control"><option value="">All suppliers</option>${state.suppliers.map(supplier => `<option value="${esc(supplier.id)}" ${state.purchaseFilter.supplier === supplier.id ? 'selected' : ''}>${esc(supplier.name)}</option>`).join('')}</select><button class="button button-small" data-action="clear-purchase-filter">Clear filters</button></div><div class="table-scroll"><table><thead><tr><th>DATE</th><th>SUPPLIER</th><th>ITEMS</th><th>QUANTITY</th><th>AMOUNT</th><th>PAYMENT</th><th></th></tr></thead><tbody>${rows}</tbody></table></div><div class="table-footer">${rowsData.length} purchase${rowsData.length === 1 ? '' : 's'} · Total <strong>${money(billed)}</strong> · Paid <strong>${money(paidSum)}</strong> · Pending <strong>${money(dueSum)}</strong></div></section>`;
@@ -360,9 +360,15 @@ function printDemands(ids) {
 window.addEventListener('afterprint', () => document.body.classList.remove('print-thermal'));
 
 function renderEmployees() {
-  const rows = state.employees.length ? state.employees.map(e => `<tr><td><strong>${esc(e.name)}</strong><span class="cell-sub">${esc(e.role || '')}</span></td><td>${esc(e.phone || '—')}</td><td>${fmtDate(e.join_date)}</td><td>${salaryText(e.salary)} <span class="cell-sub">${e.salary_type === 'daily' ? 'per day' : 'per month'}</span></td><td><span class="badge ${e.active ? 'badge-good' : 'badge-out'}">${e.active ? 'Active' : 'Left'}</span></td><td><div class="table-actions"><button class="action-button" data-action="edit-employee" data-id="${e.id}">Edit</button><button class="action-button danger" data-action="delete-employee" data-id="${e.id}">Delete</button></div></td></tr>`).join('') : '<tr><td colspan="6"><div class="empty-state"><strong>Abhi koi employee nahi</strong>+ Add employee se shuru karein.</div></td></tr>';
-  const working = state.employees.filter(e => e.active), monthlyPayroll = sumBy(working.filter(e => e.salary_type === 'monthly'), e => e.salary), dailyRate = sumBy(working.filter(e => e.salary_type === 'daily'), e => e.salary);
-  return `${heading('Employees', 'Staff ki list aur salary.', `${salaryButton()}<button class="button button-primary" data-action="add-employee">+ Add employee</button>`)}${totalChips([['Kaam kar rahe', working.length], ['Monthly salary (total)', salaryText(monthlyPayroll)], ['Daily rate (sab ka ek din)', salaryText(dailyRate)]])}<section class="panel"><div class="table-scroll"><table><thead><tr><th>NAME</th><th>PHONE</th><th>JOINED</th><th>SALARY</th><th>STATUS</th><th></th></tr></thead><tbody>${rows}</tbody></table></div><div class="table-footer">${state.employees.length} employees</div></section>`;
+  const rows = state.employees.length ? state.employees.map(e => {
+    const payroll = e.salary_type === 'monthly' ? staffStats(e) : null;
+    return `<tr><td><strong>${esc(e.name)}</strong><span class="cell-sub">${esc(e.role || '')}</span></td><td>${esc(e.phone || '—')}</td><td>${fmtDate(e.join_date)}</td><td>${salaryText(e.salary)} <span class="cell-sub">${e.salary_type === 'daily' ? 'per day' : 'per month'}</span>${payroll ? `<span class="cell-sub">${esc(state.staffMonth)} · Paid ${salaryText(payroll.paid)} · Balance ${salaryText(payroll.balance)}</span>${pendingBadge(payroll)}` : ''}</td><td><span class="badge ${e.active ? 'badge-good' : 'badge-out'}">${e.active ? 'Active' : 'Left'}</span></td><td><div class="table-actions"><button class="action-button" data-action="edit-employee" data-id="${e.id}">Edit</button><button class="action-button danger" data-action="delete-employee" data-id="${e.id}">Delete</button></div></td></tr>`;
+  }).join('') : '<tr><td colspan="6"><div class="empty-state"><strong>Abhi koi employee nahi</strong>+ Add employee se shuru karein.</div></td></tr>';
+  const working = state.employees.filter(e => e.active), monthlyStaff = working.filter(e => e.salary_type === 'monthly');
+  const monthlyPayroll = sumBy(monthlyStaff, e => e.salary), dailyRate = sumBy(working.filter(e => e.salary_type === 'daily'), e => e.salary);
+  const monthlyStats = monthlyStaff.map(staffStats);
+  const monthlyPaid = sumBy(monthlyStats, t => t.paid), monthlyPending = sumBy(monthlyStats, t => Math.max(0, t.balance));
+  return `${heading('Employees', 'Staff ki list aur salary.', `${salaryButton()}<button class="button button-primary" data-action="add-employee">+ Add employee</button>`)}${totalChips([['Kaam kar rahe', working.length], ['Monthly salary (total)', salaryText(monthlyPayroll)], [`Paid (${state.staffMonth})`, salaryText(monthlyPaid)], [`Pending (${state.staffMonth})`, salaryText(monthlyPending)], ['Daily rate (sab ka ek din)', salaryText(dailyRate)]])}<section class="panel"><div class="table-scroll"><table><thead><tr><th>NAME</th><th>PHONE</th><th>JOINED</th><th>SALARY / PAYMENT STATUS</th><th>STATUS</th><th></th></tr></thead><tbody>${rows}</tbody></table></div><div class="table-footer">${state.employees.length} employees · Monthly salary status for ${state.staffMonth}</div></section>`;
 }
 
 function employeeForm(e) {
@@ -410,17 +416,65 @@ function printStaffSlip(employeeId) {
 }
 
 const dayText = n => `${number(n)} din`;
-const pendingBadge = t => t.balance > 0 ? '<span class="badge badge-low">Pending</span>' : t.balance < 0 ? '<span class="badge badge-out">Advance zyada</span>' : '<span class="badge badge-good">Clear</span>';
+const pendingBadge = t => {
+  const status = staffPaymentStatus(t);
+  return status === 'pending' ? '<span class="badge badge-low">Pending</span>' : status === 'advance' ? '<span class="badge badge-out">Advance zyada</span>' : `<span class="badge badge-good">${status === 'done' ? 'Done' : 'Clear'}</span>`;
+};
 
 function renderStaffReport() {
   const staff = state.employees.filter(e => e.active || monthAttendance(state.attendance, e.id, state.staffMonth).length || state.advances.some(a => a.employee_id === e.id) || state.salaryPayments.some(p => p.employee_id === e.id)), pct = v => v === null ? '—' : `${v.toFixed(0)}%`;
   const stats = staff.map(e => [e, staffStats(e)]), sum = staffTotals(stats.map(x => x[1]));
-  const rows = stats.length ? stats.map(([e, t]) => `<tr><td><strong>${esc(e.name)}</strong><span class="cell-sub">${esc(e.role || '')} · ${t.daily ? 'Daily' : 'Monthly'}</span></td><td>${t.present} <span class="cell-sub">${t.onTime} on time · ${t.late} late</span></td><td>${t.absent}</td><td>${t.leave}</td><td>${pct(t.attPct)}</td><td>${pct(t.onTimePct)}</td><td>${t.avgLate === null ? '—' : `${t.avgLate.toFixed(0)} min`}</td><td>${dayText(t.earnedDays)}<span class="cell-sub">${salaryText(t.dayRate)} / din${t.daily ? '' : ` · ${t.monthDays} din ka mahina`}</span></td><td>${salaryText(t.earned)}</td><td>${t.advance ? salaryText(t.advance) : '—'}</td><td>${salaryText(t.paid)}<span class="cell-sub">${dayText(t.paidDays)} ki</span></td><td><strong class="${t.balance > 0 ? 'due' : ''}">${salaryText(t.balance)}</strong><span class="cell-sub">${dayText(t.pendingDays)} baqi</span></td><td>${pendingBadge(t)}</td><td><div class="table-actions"><button class="action-button" data-action="employee-detail" data-id="${e.id}">Details</button><button class="action-button" data-action="print-staff-slip" data-id="${e.id}">Print</button></div></td></tr>`).join('') : '<tr><td colspan="14"><div class="empty-state"><strong>Abhi koi data nahi</strong>Employees add karke attendance lagayein.</div></td></tr>';
+  const rows = stats.length ? stats.map(([e, t]) => {
+    const paid = !t.daily && isSalaryPaid(t), settlement = state.salaryPayments.some(p => p.employee_id === e.id && paymentMonth(p) === state.staffMonth && p.is_settlement);
+    const manualPaid = paid && !settlement, noBalance = !paid && salarySettlementAmount(t) <= 0;
+    const disabledTitle = manualPaid ? 'Is salary ki manual payment Salary Payments se manage karein.' : 'Is mahine koi salary balance mark karne ke liye nahi hai.';
+    const paymentControl = t.daily ? '' : `<select class="staff-payment-status filter-control" data-employee-id="${e.id}" aria-label="${esc(e.name)} salary payment status" ${manualPaid || noBalance ? `disabled title="${disabledTitle}"` : ''}><option value="unpaid" ${paid ? '' : 'selected'}>Unpaid</option><option value="paid" ${paid ? 'selected' : ''}>Paid</option></select>`;
+    return `<tr><td><strong>${esc(e.name)}</strong><span class="cell-sub">${esc(e.role || '')} · ${t.daily ? 'Daily' : 'Monthly'}</span></td><td>${t.present} <span class="cell-sub">${t.onTime} on time · ${t.late} late</span></td><td>${t.absent}</td><td>${t.leave}</td><td>${pct(t.attPct)}</td><td>${pct(t.onTimePct)}</td><td>${t.avgLate === null ? '—' : `${t.avgLate.toFixed(0)} min`}</td><td>${dayText(t.earnedDays)}<span class="cell-sub">${salaryText(t.dayRate)} / din${t.daily ? '' : ` · ${t.monthDays} din ka mahina`}</span></td><td>${salaryText(t.earned)}</td><td>${t.advance ? salaryText(t.advance) : '—'}</td><td>${salaryText(t.paid)}<span class="cell-sub">${dayText(t.paidDays)} ki</span></td><td><strong class="${t.balance > 0 ? 'due' : ''}">${salaryText(t.balance)}</strong><span class="cell-sub">${dayText(t.pendingDays)} baqi</span></td><td>${pendingBadge(t)}</td><td><div class="table-actions">${paymentControl}<button class="action-button" data-action="employee-detail" data-id="${e.id}">Details</button><button class="action-button" data-action="print-staff-slip" data-id="${e.id}">Print</button></div></td></tr>`;
+  }).join('') : '<tr><td colspan="14"><div class="empty-state"><strong>Abhi koi data nahi</strong>Employees add karke attendance lagayein.</div></td></tr>';
   const chips = totalChips([['Employees', staff.length], ['Total earned', salaryText(sum.earned)], ['Advance', salaryText(sum.advance)], ['Ada ho chuka (Paid)', salaryText(sum.paid)], ['Pending (dena baqi)', salaryText(sum.balance), 'due']]);
   return `${heading('Staff Report', 'Har employee ki hazri, kitni din ki salary mili aur kitni baqi hai.', `<input id="staff-month" class="filter-control" type="month" value="${state.staffMonth}"><select id="thermal-width" class="filter-control" aria-label="Printer size"><option value="80">80mm printer</option><option value="58">58mm printer</option></select>${salaryButton()}<button class="button" data-action="print-page">Print report</button>`)}${chips}<section class="panel"><div class="table-scroll"><table><thead><tr><th>EMPLOYEE</th><th>PRESENT</th><th>ABSENT</th><th>LEAVE</th><th>ATTENDANCE</th><th>ON TIME</th><th>AVG LATE</th><th>SALARY DAYS</th><th>EARNED</th><th>ADVANCE</th><th>PAID</th><th>PENDING</th><th>STATUS</th><th></th></tr></thead><tbody>${rows}</tbody></table></div><div class="table-footer">Total ${stats.length} employees · Present ${sum.present} din · Absent ${sum.absent} · Leave ${sum.leave} · Earned <strong>${salaryText(sum.earned)}</strong> · Advance <strong>${salaryText(sum.advance)}</strong> · Paid <strong>${salaryText(sum.paid)}</strong> · Pending <strong>${salaryText(sum.balance)}</strong></div></section>`;
 }
 
-// One employee, one month: summary + every attendance day + advances + salary payments.
+async function setMonthlySalaryPaid(employeeId, paid) {
+  const employee = state.employees.find(e => e.id === employeeId);
+  if (!employee || employee.salary_type !== 'monthly') throw new Error('Monthly salary wala employee nahi mila.');
+  const salaryMonth = `${state.staffMonth}-01`;
+  const settlements = state.salaryPayments.filter(p => p.employee_id === employeeId && paymentMonth(p) === state.staffMonth && p.is_settlement);
+  if (!paid) {
+    if (!settlements.length) return;
+    const { error } = await supabase.from('salary_payments').delete().eq('employee_id', employeeId).eq('salary_month', salaryMonth).eq('is_settlement', true);
+    if (error) throw migrationHint(error);
+    return;
+  }
+  const stats = staffStats(employee);
+  if (isSalaryPaid(stats)) return;
+  const amount = salarySettlementAmount(stats);
+  if (!(amount > 0)) throw new Error('Is mahine koi salary baqi nahi hai.');
+  if (settlements.length) {
+    const settlement = settlements[0];
+    const { error } = await supabase.from('salary_payments').update({ amount: round2(Number(settlement.amount) + amount) }).eq('id', settlement.id);
+    if (error) throw migrationHint(error);
+    return;
+  }
+  const { error } = await supabase.from('salary_payments').insert({
+    employee_id: employeeId, date: today(), salary_month: salaryMonth, amount,
+    note: 'Monthly salary paid in full from Staff Report', is_settlement: true
+  });
+  if (error) throw migrationHint(error);
+}
+
+async function updateMonthlySalaryStatus(select) {
+  try {
+    await setMonthlySalaryPaid(select.dataset.employeeId, select.value === 'paid');
+    await loadData();
+    render();
+    toast(select.value === 'paid' ? 'Puri monthly salary Paid mark ho gayi.' : 'Monthly salary Unpaid mark ho gayi.');
+  } catch (error) {
+    render();
+    toast(error.message || 'Salary status update nahi ho saka.', true);
+  }
+}
+
 function employeeDetail(id) {
   const e = state.employees.find(x => x.id === id); if (!e) return;
   const [from, to] = monthRange(state.staffMonth), t = staffStats(e), label = { on_time: 'On time', late: 'Late', absent: 'Absent', leave: 'Leave' };
@@ -694,11 +748,32 @@ function adjustmentForm(item = null) {
   openModal('Adjust stock', 'Record stock added or removed', `<form id="adjustment-form"><div class="form-grid"><label class="span-2">Item<select name="item_id" required>${options}</select></label><label>Adjustment<select name="type"><option value="add">Add stock</option><option value="remove">Remove stock</option></select></label><label>Quantity<input name="quantity" type="number" min="0.001" step="0.001" required placeholder="0"></label><label class="span-2">Reason<select name="reason"><option>Wastage</option><option>Damage</option><option>Manual Correction</option><option>Other</option></select></label></div>${modalFooter('Save adjustment')}</form>`);
 }
 
-function purchaseForm() {
+function purchaseRow(line = null) {
+  const options = state.items.map(item => `<option value="${item.id}" data-cost="${esc(item.cost_per_unit)}" ${line?.item_id === item.id ? 'selected' : ''}>${esc(item.name)} (${esc(item.unit)})</option>`).join('');
+  const cost = line?.cost_per_unit ?? state.items[0]?.cost_per_unit ?? 0;
+  return `<div class="purchase-row"><select name="item_id" required aria-label="Inventory item">${options}</select><input name="quantity" type="number" min="0.001" step="0.001" value="${line ? esc(line.quantity) : '1'}" required aria-label="Quantity"><input name="cost_per_unit" type="number" min="0" step="0.01" value="${esc(cost)}" required aria-label="Cost per unit"><button class="action-button danger" type="button" data-action="remove-purchase-row" aria-label="Remove item">×</button></div>`;
+}
+
+function purchaseForm(purchase = null) {
   if (!state.items.length) return toast('Add an inventory item before recording a purchase.', true);
-  const itemOptions = state.items.map(item => `<option value="${item.id}" data-cost="${esc(item.cost_per_unit)}">${esc(item.name)} (${esc(item.unit)})</option>`).join('');
   const supplierOptions = state.suppliers.map(supplier => `<option value="${supplier.id}">${esc(supplier.name)}</option>`).join('');
-  openModal('Record a purchase', 'Stock is increased when this purchase is saved', `<form id="purchase-form"><div class="form-grid"><label>Date<input name="date" type="date" value="${today()}" required></label><label>Supplier<select name="supplier_id"><option value="">No supplier</option>${supplierOptions}</select></label><label class="span-2">Item<select name="item_id" required>${itemOptions}</select></label><label>Quantity<input name="quantity" type="number" min="0.001" step="0.001" value="1" required></label><label>Cost per unit (Rs.)<input name="cost_per_unit" type="number" min="0" step="0.01" value="${esc(state.items[0]?.cost_per_unit || 0)}" required></label><label>Payment<select name="payment"><option value="paid">Paid (poora)</option><option value="pending">Pending (udhaar)</option><option value="partial">Partial</option></select></label><label>Paid amount (Rs.)<input name="paid_amount" type="number" min="0" step="0.01" placeholder="Partial par likhein" disabled></label><div class="amount-preview span-2">Purchase total <strong id="purchase-total">${money(state.items[0]?.cost_per_unit || 0)}</strong></div></div>${modalFooter('Save purchase')}</form>`);
+  const lines = purchase ? state.purchaseItems.filter(line => line.purchase_id === purchase.id) : [];
+  const rows = (lines.length ? lines : [null]).map(purchaseRow).join('');
+  const total = lines.length ? sumBy(lines, line => line.total) : Number(state.items[0]?.cost_per_unit || 0);
+  const paymentFields = purchase
+    ? `<div class="amount-preview span-2">Already paid <strong>${money(purchase.paid_amount)}</strong><span class="form-help">Recorded payments stay unchanged; any increase in the total remains pending.</span></div>`
+    : `<label>Payment<select name="payment"><option value="paid">Paid (poora)</option><option value="pending">Pending (udhaar)</option><option value="partial">Partial</option></select></label><label>Paid amount (Rs.)<input name="paid_amount" type="number" min="0" step="0.01" placeholder="Partial par likhein" disabled></label>`;
+  openModal(purchase ? 'Edit purchase' : 'Record a purchase', purchase ? 'Edit items without duplicating inventory stock' : 'Stock is increased when this purchase is saved', `<form id="purchase-form" data-id="${purchase?.id || ''}"><div class="form-grid"><label>Date<input name="date" type="date" value="${esc(purchase?.date || today())}" required></label><label>Supplier<select name="supplier_id"><option value="">No supplier</option>${supplierOptions}</select></label></div><div id="purchase-rows" class="purchase-rows">${rows}</div><button class="button button-small" type="button" data-action="add-purchase-row">+ Add item</button><div class="form-grid purchase-payment-fields">${paymentFields}<div class="amount-preview span-2">Purchase total <strong id="purchase-total">${money(total)}</strong></div></div>${modalFooter(purchase ? 'Save changes' : 'Save purchase')}</form>`);
+  if (purchase?.supplier_id) $('#purchase-form [name="supplier_id"]').value = purchase.supplier_id;
+}
+
+function updatePurchaseTotal(form) {
+  const total = [...form.querySelectorAll('.purchase-row')].reduce((sum, row) => {
+    const quantity = Number(row.querySelector('[name="quantity"]').value || 0);
+    const cost = Number(row.querySelector('[name="cost_per_unit"]').value || 0);
+    return sum + quantity * cost;
+  }, 0);
+  $('#purchase-total').textContent = money(total);
 }
 
 function supplierForm(supplier = null) {
@@ -742,13 +817,28 @@ async function handleSubmit(event) {
     } else if (form.id === 'category-form') {
       await saveForm(form, 'categories', { name: data.get('name').trim() }, form.dataset.id); toast(form.dataset.id ? 'Category updated.' : 'Category added.');
     } else if (form.id === 'purchase-form') {
-      const { data: purchaseId, error } = await supabase.rpc('record_purchase', { p_date: data.get('date'), p_supplier_id: data.get('supplier_id') || null, p_items: [{ item_id: data.get('item_id'), quantity: Number(data.get('quantity')), cost_per_unit: Number(data.get('cost_per_unit')) }], p_paid: { paid: null, pending: 0, partial: Number(data.get('paid_amount') || 0) }[data.get('payment')] }); if (error) throw error; toast('Purchase saved and stock updated.');
+      const itemIds = data.getAll('item_id'), quantities = data.getAll('quantity'), costs = data.getAll('cost_per_unit');
+      const items = itemIds.map((itemId, index) => ({ item_id: itemId, quantity: Number(quantities[index]), cost_per_unit: Number(costs[index]) }));
+      if (form.dataset.id) {
+        const { error } = await supabase.rpc('update_purchase', { p_purchase_id: form.dataset.id, p_date: data.get('date'), p_supplier_id: data.get('supplier_id') || null, p_items: items });
+        if (error) {
+          if (error.code === 'PGRST202' || /Could not find the function public\.update_purchase|update_purchase.*schema cache/i.test(error.message || '')) {
+            throw new Error(`${error.message} — Supabase SQL Editor mein pending_bills.sql dobara run karein (README: Purchase editing).`);
+          }
+          throw error;
+        }
+        toast('Purchase update ho gayi. Inventory stock sahi adjust ho gaya.');
+      } else {
+        const { error } = await supabase.rpc('record_purchase', { p_date: data.get('date'), p_supplier_id: data.get('supplier_id') || null, p_items: items, p_paid: { paid: null, pending: 0, partial: Number(data.get('paid_amount') || 0) }[data.get('payment')] });
+        if (error) throw error;
+        toast('Purchase saved and stock updated.');
+      }
     } else if (form.id === 'employee-form') {
       await saveForm(form, 'employees', { name: data.get('name').trim(), phone: data.get('phone').trim(), role: data.get('role').trim(), salary_type: data.get('salary_type'), salary: Number(data.get('salary')), active: form.dataset.id ? data.has('active') : true, join_date: data.get('join_date') || null }, form.dataset.id); toast('Employee save ho gaya.');
     } else if (form.id === 'advance-form') {
       const amount = round2(data.get('amount')); if (!(amount > 0)) throw new Error('Amount zero se zyada honi chahiye'); await saveForm(form, 'advances', { employee_id: data.get('employee_id'), date: data.get('date'), amount, note: data.get('note').trim() }); toast('Advance save ho gaya.');
     } else if (form.id === 'salary-payment-form') {
-      const amount = round2(data.get('amount')); if (!(amount > 0)) throw new Error('Amount zero se zyada honi chahiye'); await saveForm(form, 'salary_payments', { employee_id: data.get('employee_id'), date: data.get('date'), salary_month: `${data.get('salary_month')}-01`, amount, note: data.get('note').trim() }); toast('Salary payment save ho gayi.');
+      const amount = round2(data.get('amount')), salaryMonth = data.get('salary_month'); if (!(amount > 0)) throw new Error('Amount zero se zyada honi chahiye'); await saveForm(form, 'salary_payments', { employee_id: data.get('employee_id'), date: data.get('date'), salary_month: `${salaryMonth}-01`, amount, note: data.get('note').trim() }); state.staffMonth = salaryMonth; toast('Salary payment save ho gayi. Staff Report ab isi salary month par khulegi.');
     } else if (form.id === 'candidate-form') {
       await saveForm(form, 'candidates', { name: data.get('name').trim(), phone: data.get('phone').trim(), role: data.get('role').trim(), salary_type: data.get('salary_type'), expected_salary: Number(data.get('expected_salary')), join_date: data.get('join_date') || null, status: form.dataset.id ? data.get('status') : 'pending', note: data.get('note').trim() }, form.dataset.id); toast('Save ho gaya.');
     } else if (form.id === 'market-form') {
@@ -832,6 +922,13 @@ document.addEventListener('click', async event => {
       case 'adjust-stock': adjustmentForm(state.items.find(item => item.id === id)); break;
       case 'open-adjustment': adjustmentForm(); break;
       case 'open-purchase': purchaseForm(); break;
+      case 'edit-purchase': {
+        const purchase = state.purchases.find(entry => entry.id === id);
+        if (!purchase) throw new Error('Purchase nahi mili. Page refresh karke dobara try karein.');
+        purchaseForm(purchase); break;
+      }
+      case 'add-purchase-row': $('#purchase-rows').insertAdjacentHTML('beforeend', purchaseRow()); updatePurchaseTotal($('#purchase-form')); break;
+      case 'remove-purchase-row': if ($$('#purchase-rows .purchase-row').length > 1) { button.closest('.purchase-row').remove(); updatePurchaseTotal($('#purchase-form')); } break;
       case 'export-dashboard-expenses': await exportDashboardExpenses(); break;
       case 'toggle-salary': if (state.page === 'attendance') state.attDraft = { date: state.attDate, map: readAttendanceDom() }; state.showSalary = !state.showSalary; render(); break;
       case 'pay-bill': payBillForm(id); break;
@@ -931,10 +1028,11 @@ document.addEventListener('input', event => {
   if (event.target.id === 'global-search') { state.search = event.target.value; if (state.page !== 'inventory') state.page = 'inventory'; render(); const box = $('#inventory-search'); if (box) { box.focus(); box.setSelectionRange(box.value.length, box.value.length); } }
   if (event.target.id === 'inventory-search') { state.search = event.target.value; refreshInventoryRows(); }
   if (event.target.id === 'expense-search') { const cursor = event.target.selectionStart; state.expenseSearch = event.target.value; render(); const box = $('#expense-search'); if (box) { box.focus(); box.setSelectionRange(cursor, cursor); } }
-  if (event.target.matches('#purchase-form [name="quantity"], #purchase-form [name="cost_per_unit"]')) { const form = $('#purchase-form'); const total = Number(form.elements.quantity.value || 0) * Number(form.elements.cost_per_unit.value || 0); $('#purchase-total').textContent = money(total); }
+  if (event.target.matches('#purchase-form [name="quantity"], #purchase-form [name="cost_per_unit"]')) updatePurchaseTotal($('#purchase-form'));
 });
 
 document.addEventListener('change', event => {
+  if (event.target.matches('.staff-payment-status')) { const select = event.target; select.disabled = true; updateMonthlySalaryStatus(select); return; }
   if (event.target.matches('#purchase-form [name="payment"]')) { const f = $('#purchase-form').elements.paid_amount; f.disabled = event.target.value !== 'partial'; f.required = !f.disabled; if (f.disabled) f.value = ''; }
   if (event.target.id === 'dashboard-expense-period' && ['day', 'month', 'year'].includes(event.target.value)) { state.dashboardExpensePeriod = event.target.value; loadData().then(render).catch(e => toast(e.message, true)); }
   if (event.target.id === 'dashboard-expense-date' && event.target.value) { state.dashboardExpenseDate = event.target.value; loadData().then(render).catch(e => toast(e.message, true)); }
@@ -954,7 +1052,7 @@ document.addEventListener('change', event => {
   if (event.target.id === 'report-from') { state.customFrom = event.target.value; render(); }
   if (event.target.id === 'report-to') { state.customTo = event.target.value; render(); }
   if (event.target.matches('#demand-form [name="item_id"]')) event.target.closest('.demand-row').querySelector('.qty-unit').textContent = event.target.selectedOptions[0].dataset.unit;
-  if (event.target.matches('#purchase-form [name="item_id"]')) { const option = event.target.selectedOptions[0]; $('#purchase-form [name="cost_per_unit"]').value = option.dataset.cost; $('#purchase-total').textContent = money(option.dataset.cost); }
+  if (event.target.matches('#purchase-form [name="item_id"]')) { const row = event.target.closest('.purchase-row'); row.querySelector('[name="cost_per_unit"]').value = event.target.selectedOptions[0].dataset.cost; updatePurchaseTotal($('#purchase-form')); }
 });
 
 $('#auth-mode').addEventListener('click', () => {

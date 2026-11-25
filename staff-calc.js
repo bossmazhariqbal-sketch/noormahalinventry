@@ -12,6 +12,9 @@ export function monthRange(ym) {
 
 // Which salary month a monthly-salary payment belongs to (older rows without salary_month use their own date).
 export const paymentMonth = p => String(p.salary_month || p.date || '').slice(0, 7);
+export const staffPaymentStatus = ({ balance, paid }) => balance > 0 ? 'pending' : balance < 0 ? 'advance' : paid > 0 ? 'done' : 'clear';
+export const salarySettlementAmount = stats => round2(Math.max(0, Number(stats.balance) || 0));
+export const isSalaryPaid = stats => Number(stats.paid) > 0 && Number(stats.balance) <= 0;
 
 // Attendance rows of one employee inside one month only (state.attendance may also hold another date being edited).
 export function monthAttendance(rows, employeeId, ym) {

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { round2, sum2, monthRange, paymentMonth, calcStaffStats, attendanceTotals } from './staff-calc.js';
+import { round2, sum2, monthRange, paymentMonth, calcStaffStats, attendanceTotals, staffPaymentStatus, salarySettlementAmount, isSalaryPaid } from './staff-calc.js';
 
 const att = (employee_id, date, status, extra = {}) => ({ employee_id, date, status, late_minutes: 0, paid: false, ...extra });
 
@@ -57,4 +57,24 @@ test('advance bigger than earnings gives negative balance (not hidden)', () => {
   const e = { id: 'x', salary: 900, salary_type: 'daily' };
   const s = calcStaffStats(e, [], [{ employee_id: 'x', date: '2026-09-30', amount: 1400 }], [], '2026-09');
   assert.equal(s.balance, -1400); assert.equal(s.pendingDays, -1.56);
+});
+test('salary payment status distinguishes pending, done, clear and excess advance', () => {
+  assert.equal(staffPaymentStatus({ balance: 500, paid: 100 }), 'pending');
+  assert.equal(staffPaymentStatus({ balance: 0, paid: 1000 }), 'done');
+  assert.equal(staffPaymentStatus({ balance: 0, paid: 0 }), 'clear');
+  assert.equal(staffPaymentStatus({ balance: -100, paid: 1000 }), 'advance');
+});
+test('marking salary paid settles the full remaining balance once', () => {
+  assert.equal(salarySettlementAmount({ balance: 13500, paid: 16500 }), 13500);
+  assert.equal(salarySettlementAmount({ balance: 0, paid: 30000 }), 0);
+  assert.equal(isSalaryPaid({ balance: 0, paid: 30000 }), true);
+  assert.equal(isSalaryPaid({ balance: 13500, paid: 16500 }), false);
+  const employee = { id: 'm', salary: 30000, salary_type: 'monthly' };
+  const previousPayment = { employee_id: 'm', salary_month: '2026-10-01', amount: 16500 };
+  const before = calcStaffStats(employee, [], [], [previousPayment], '2026-10');
+  const settlement = { employee_id: 'm', salary_month: '2026-10-01', amount: salarySettlementAmount(before), is_settlement: true };
+  const after = calcStaffStats(employee, [], [], [previousPayment, settlement], '2026-10');
+  assert.equal(settlement.amount, 13500);
+  assert.equal(after.balance, 0);
+  assert.equal(isSalaryPaid(after), true);
 });
